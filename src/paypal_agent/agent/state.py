@@ -23,3 +23,10 @@ class PaymentAgentState(TypedDict):
     # Result of the PayPal invoice operation.
     invoice_id: NotRequired[str]
     invoice_status: NotRequired[str]
+
+    # Follow-up action on the created invoice: "send_invoice",
+    # "check_status", "send_reminder" or "refund". Empty when none.
+    requested_action: NotRequired[str]
+
+    # Refunds move money back, so they need their own confirmation.
+    pending_refund_confirmation: NotRequired[bool]
