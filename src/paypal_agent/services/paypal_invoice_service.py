@@ -183,15 +183,33 @@ class PayPalInvoiceService:
         method: str,
         path: str,
         json: dict | None = None,
+        params: dict | None = None,
     ) -> dict:
         """Call a PayPal Invoicing endpoint and return the JSON body."""
+
+        return await self._request(
+            method,
+            f"/v2/invoicing/invoices{path}",
+            json=json,
+            params=params,
+        )
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        json: dict | None = None,
+        params: dict | None = None,
+    ) -> dict:
+        """Call any PayPal REST endpoint and return the JSON body."""
 
         access_token = await self._get_access_token()
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.request(
                 method,
-                f"{self.base_url}/v2/invoicing/invoices{path}",
+                f"{self.base_url}{path}",
+                params=params,
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json",
@@ -245,4 +263,62 @@ class PayPalInvoiceService:
                 "subject": "Reminder: your invoice is waiting",
                 "note": "This is a friendly reminder to pay your invoice.",
             },
+        )
+
+    async def list_invoices(self, page_size: int = 20) -> list[dict]:
+        """List the merchant's most recent invoices."""
+
+        result = await self._invoice_request(
+            "GET",
+            "",
+            params={"page": 1, "page_size": page_size},
+        )
+
+        return result.get("items", [])
+
+    async def refund_invoice(
+        self,
+        invoice_id: str,
+        amount: Decimal | None = None,
+    ) -> dict:
+        """Refund the PayPal payment made against an invoice.
+
+        Refunds the full payment unless a smaller amount is given.
+        """
+
+        invoice = await self.get_invoice(invoice_id)
+
+        # An invoice paid through PayPal stores the capture ID of that
+        # payment. Refunds are made against this capture.
+        capture_ids = [
+            transaction["payment_id"]
+            for transaction in invoice.get("payments", {}).get(
+                "transactions", []
+            )
+            if transaction.get("type") == "PAYPAL"
+            and transaction.get("payment_id")
+        ]
+
+        if not capture_ids:
+            raise ValueError(
+                "This invoice has no PayPal payment that can be refunded."
+            )
+
+        body = {}
+
+        if amount is not None:
+            amount = Decimal(str(amount))
+
+            if not amount.is_finite() or amount <= 0:
+                raise ValueError("Refund amount must be greater than zero.")
+
+            body["amount"] = {
+                "currency_code": invoice["detail"]["currency_code"],
+                "value": f"{amount:.2f}",
+            }
+
+        return await self._request(
+            "POST",
+            f"/v2/payments/captures/{capture_ids[0]}/refund",
+            json=body,
         )

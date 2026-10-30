@@ -24,6 +24,11 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./paypal_agent.db"
 
+    # Background payment monitor.
+    monitor_enabled: bool = True
+    monitor_interval_seconds: int = 60
+    monitor_auto_remind: bool = True
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

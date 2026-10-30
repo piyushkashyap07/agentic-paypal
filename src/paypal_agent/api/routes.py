@@ -3,11 +3,16 @@ from paypal_agent.api.schemas import (
     ChatRequest,
     ChatResponse,
     CreateInvoiceRequest,
+    RefundRequest,
 )
 
 from uuid import uuid4
 from paypal_agent.services.paypal_invoice_service import PayPalInvoiceService
-from paypal_agent.workers.payment_monitor import check_invoice
+from paypal_agent.workers.payment_monitor import (
+    check_invoice,
+    events as monitor_events,
+    summarize_invoice,
+)
 
 router = APIRouter(prefix="/api", tags=["Agent"])
 
@@ -141,3 +146,50 @@ async def send_invoice_reminder(invoice_id: str):
             status_code=502,
             detail="PayPal could not send the reminder.",
         ) from exc
+
+
+@router.get("/invoices", tags=["Invoices"])
+async def list_invoices():
+    try:
+        items = await PayPalInvoiceService().list_invoices()
+        return [summarize_invoice(item) for item in items]
+
+    except Exception as exc:
+        print(f"PayPal invoice list failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not list the invoices.",
+        ) from exc
+
+
+@router.post("/invoices/{invoice_id}/refund", tags=["Invoices"])
+async def refund_invoice(invoice_id: str, refund: RefundRequest):
+    try:
+        result = await PayPalInvoiceService().refund_invoice(
+            invoice_id,
+            amount=refund.amount,
+        )
+
+        return {
+            "status": "refunded",
+            "invoice_id": invoice_id,
+            "refund_id": result.get("id"),
+            "refund_status": result.get("status"),
+        }
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    except Exception as exc:
+        print(f"PayPal refund failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not refund the payment.",
+        ) from exc
+
+
+@router.get("/events", tags=["Monitor"])
+async def list_events():
+    return monitor_events
