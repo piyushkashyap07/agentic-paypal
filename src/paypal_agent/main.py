@@ -1,12 +1,16 @@
+import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import aiosqlite
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from paypal_agent.agent.graph import build_graph
 from paypal_agent.api.routes import router
 from paypal_agent.config import settings
+from paypal_agent.workers.payment_monitor import run_monitor_loop
 
 
 @asynccontextmanager
@@ -21,7 +25,15 @@ async def lifespan(app: FastAPI):
 
         app.state.payment_agent = build_graph(checkpointer)
 
+        monitor_task = None
+
+        if settings.monitor_enabled:
+            monitor_task = asyncio.create_task(run_monitor_loop())
+
         yield
+
+        if monitor_task:
+            monitor_task.cancel()
 
     print("Shutting down PayPal AI Agent...")
 
@@ -48,3 +60,8 @@ async def root():
 @app.get("/health", tags=["Health"])
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/ui", include_in_schema=False)
+async def chat_ui():
+    return FileResponse(Path(__file__).parent / "static" / "index.html")

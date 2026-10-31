@@ -47,7 +47,24 @@ def get_llm() -> AsyncClient:
     )
 
 
+INVOICE_ACTIONS = {
+    "send_invoice",
+    "check_status",
+    "send_reminder",
+    "refund",
+}
+
+
 async def understand_request(state: PaymentAgentState) -> dict:
+    """Understand the message and clear any stale follow-up action."""
+
+    updates = await _understand_message(state)
+    updates.setdefault("requested_action", "")
+
+    return updates
+
+
+async def _understand_message(state: PaymentAgentState) -> dict:
     """Extract user intent and invoice fields using Ollama Cloud."""
 
     history = state.get("conversation_history", [])
@@ -55,7 +72,8 @@ async def understand_request(state: PaymentAgentState) -> dict:
     extraction_prompt = """
 Return only a valid JSON object with these fields:
 {
-  "intent": "create_invoice" or "general",
+  "intent": "create_invoice", "send_invoice", "check_status",
+            "send_reminder", "refund" or "general",
   "customer_name": string or null,
   "customer_email": string or null,
   "amount": string or null,
@@ -72,6 +90,11 @@ Rules:
 - If the conversation is already about preparing an invoice,
   continue processing the invoice when the user supplies missing details.
 - If the user asks to create an invoice, use intent "create_invoice".
+- If the user asks to send or email the invoice, use "send_invoice".
+- If the user asks whether the invoice is paid or its status,
+  use "check_status".
+- If the user asks to remind or chase the customer, use "send_reminder".
+- If the user asks to refund or return the money, use "refund".
 - For unrelated requests, use intent "general".
 - Do not claim an invoice has been created.
 - The response should be concise.
@@ -119,6 +142,27 @@ Rules:
             "conversation_history": save_conversation_turn(
                 state, response
             ),
+        }
+
+    # Follow-up actions work on the invoice created in this conversation.
+    if extracted.get("intent") in INVOICE_ACTIONS:
+        if not state.get("invoice_id"):
+            response = (
+                "There is no invoice in this conversation yet. "
+                "Tell me who to invoice and for how much."
+            )
+
+            return {
+                "response": response,
+                "needs_clarification": True,
+                "conversation_history": save_conversation_turn(
+                    state, response
+                ),
+            }
+
+        return {
+            "requested_action": extracted["intent"],
+            "needs_clarification": False,
         }
 
     updates = {}
@@ -398,7 +442,8 @@ async def create_invoice_draft(state: PaymentAgentState) -> dict:
             "PayPal draft invoice created successfully.\n"
             f"Invoice ID: {invoice_id}\n"
             f"Status: {invoice_status}\n"
-            "The invoice has not been emailed to the customer."
+            "The invoice has not been emailed to the customer. "
+            "Reply SEND to email it."
         )
 
         return {
@@ -436,3 +481,237 @@ async def create_invoice_draft(state: PaymentAgentState) -> dict:
                 state, response
             ),
         }
+
+STATUS_EXPLANATIONS = {
+    "DRAFT": "is a draft and has not been sent yet",
+    "SENT": "has been sent and is waiting for payment",
+    "UNPAID": "has been sent and is waiting for payment",
+    "PARTIALLY_PAID": "has been partly paid",
+    "PAID": "has been paid",
+    "MARKED_AS_PAID": "has been marked as paid",
+    "CANCELLED": "has been cancelled",
+    "REFUNDED": "has been refunded",
+    "PARTIALLY_REFUNDED": "has been partly refunded",
+}
+
+
+def describe_invoice(summary: dict) -> str:
+    """Explain an invoice status in plain language."""
+
+    status = summary.get("status") or "UNKNOWN"
+    explanation = STATUS_EXPLANATIONS.get(
+        status, f"has status {status}"
+    )
+
+    text = (
+        f"Invoice {summary['invoice_id']} {explanation}.\n"
+        f"Amount due: {summary.get('amount_due')} "
+        f"{summary.get('currency')}"
+    )
+
+    if summary.get("next_action") == "send_reminder":
+        text += "\nThe due date has passed. Reply REMIND to chase it."
+
+    return text
+
+
+def action_result(
+    state: PaymentAgentState,
+    response: str,
+    **updates,
+) -> dict:
+    """Build the state update for a finished follow-up action."""
+
+    return {
+        **updates,
+        "requested_action": "",
+        "response": response,
+        "needs_clarification": False,
+        "conversation_history": save_conversation_turn(state, response),
+    }
+
+
+async def send_invoice_node(state: PaymentAgentState) -> dict:
+    """Email the conversation's draft invoice to the customer."""
+
+    from paypal_agent.services.paypal_invoice_service import (
+        PayPalInvoiceService,
+    )
+    from paypal_agent.workers.payment_monitor import check_invoice
+
+    invoice_id = state["invoice_id"]
+
+    try:
+        await PayPalInvoiceService().send_invoice(invoice_id)
+        summary = await check_invoice(invoice_id)
+
+    except ValueError as exc:
+        return action_result(state, f"I couldn't send the invoice: {exc}")
+
+    except Exception as exc:
+        print(f"PayPal invoice send failed: {type(exc).__name__}: {exc}")
+
+        return action_result(
+            state,
+            "I couldn't confirm that the invoice was sent. "
+            "Please check it in PayPal before retrying.",
+        )
+
+    response = (
+        f"Invoice {invoice_id} was emailed to the customer.\n"
+        f"Payment link: {summary.get('pay_link')}\n"
+        "I'll keep watching it and tell you when it's paid."
+    )
+
+    return action_result(
+        state,
+        response,
+        invoice_status=summary.get("status", "SENT"),
+    )
+
+
+async def check_status_node(state: PaymentAgentState) -> dict:
+    """Look up the latest PayPal status of the conversation's invoice."""
+
+    from paypal_agent.workers.payment_monitor import check_invoice
+
+    try:
+        summary = await check_invoice(state["invoice_id"])
+
+    except Exception as exc:
+        print(f"PayPal invoice lookup failed: {type(exc).__name__}: {exc}")
+
+        return action_result(
+            state,
+            "I couldn't reach PayPal to check the invoice. Try again soon.",
+        )
+
+    return action_result(
+        state,
+        describe_invoice(summary),
+        invoice_status=summary.get("status", ""),
+    )
+
+
+async def send_reminder_node(state: PaymentAgentState) -> dict:
+    """Send a payment reminder for the conversation's invoice."""
+
+    from paypal_agent.services.paypal_invoice_service import (
+        PayPalInvoiceService,
+    )
+    from paypal_agent.workers.payment_monitor import check_invoice
+
+    invoice_id = state["invoice_id"]
+
+    try:
+        summary = await check_invoice(invoice_id)
+
+        if summary.get("status") not in {"SENT", "UNPAID", "PARTIALLY_PAID"}:
+            return action_result(
+                state,
+                "A reminder isn't needed. " + describe_invoice(summary),
+            )
+
+        await PayPalInvoiceService().send_reminder(invoice_id)
+
+    except Exception as exc:
+        print(f"PayPal reminder failed: {type(exc).__name__}: {exc}")
+
+        return action_result(
+            state,
+            "I couldn't confirm that the reminder was sent.",
+        )
+
+    return action_result(
+        state,
+        f"Reminder sent to the customer for invoice {invoice_id}.",
+    )
+
+
+async def request_refund_node(state: PaymentAgentState) -> dict:
+    """Ask the user to confirm before any money is refunded."""
+
+    from paypal_agent.workers.payment_monitor import check_invoice
+
+    try:
+        summary = await check_invoice(state["invoice_id"])
+
+    except Exception as exc:
+        print(f"PayPal invoice lookup failed: {type(exc).__name__}: {exc}")
+
+        return action_result(
+            state,
+            "I couldn't reach PayPal to check the invoice. Try again soon.",
+        )
+
+    if summary.get("status") not in {"PAID", "PARTIALLY_REFUNDED"}:
+        return action_result(
+            state,
+            "Only paid invoices can be refunded. "
+            + describe_invoice(summary),
+        )
+
+    response = (
+        f"This will refund the payment for invoice {summary['invoice_id']} "
+        f"({summary.get('amount')} {summary.get('currency')}) "
+        "back to the customer.\n"
+        "Reply CONFIRM REFUND to continue, or CANCEL to stop."
+    )
+
+    return action_result(
+        state,
+        response,
+        pending_refund_confirmation=True,
+    )
+
+
+async def refund_node(state: PaymentAgentState) -> dict:
+    """Refund the invoice payment after explicit confirmation."""
+
+    from paypal_agent.services.paypal_invoice_service import (
+        PayPalInvoiceService,
+    )
+
+    message = state.get("user_message", "").strip().casefold()
+
+    if message != "confirm refund":
+        return action_result(
+            state,
+            "Refund cancelled. No money was moved.",
+            pending_refund_confirmation=False,
+        )
+
+    if not state.get("pending_refund_confirmation"):
+        return action_result(
+            state,
+            "There is no refund waiting for confirmation.",
+        )
+
+    try:
+        result = await PayPalInvoiceService().refund_invoice(
+            state["invoice_id"]
+        )
+
+    except ValueError as exc:
+        return action_result(
+            state,
+            f"I couldn't refund the payment: {exc}",
+            pending_refund_confirmation=False,
+        )
+
+    except Exception as exc:
+        print(f"PayPal refund failed: {type(exc).__name__}: {exc}")
+
+        return action_result(
+            state,
+            "I couldn't confirm that the refund went through. "
+            "Please check PayPal before retrying.",
+            pending_refund_confirmation=False,
+        )
+
+    return action_result(
+        state,
+        f"Refund {result.get('id')} is {result.get('status')}. "
+        "The money is on its way back to the customer.",
+        pending_refund_confirmation=False,
+    )

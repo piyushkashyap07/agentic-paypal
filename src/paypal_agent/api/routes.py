@@ -3,10 +3,16 @@ from paypal_agent.api.schemas import (
     ChatRequest,
     ChatResponse,
     CreateInvoiceRequest,
+    RefundRequest,
 )
 
 from uuid import uuid4
 from paypal_agent.services.paypal_invoice_service import PayPalInvoiceService
+from paypal_agent.workers.payment_monitor import (
+    check_invoice,
+    events as monitor_events,
+    summarize_invoice,
+)
 
 router = APIRouter(prefix="/api", tags=["Agent"])
 
@@ -86,3 +92,104 @@ async def create_invoice_draft(
             status_code=502,
             detail="PayPal could not create the invoice draft.",
         ) from exc
+
+
+@router.post("/invoices/{invoice_id}/send", tags=["Invoices"])
+async def send_invoice(invoice_id: str):
+    try:
+        await PayPalInvoiceService().send_invoice(invoice_id)
+        return await check_invoice(invoice_id)
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    except Exception as exc:
+        print(f"PayPal invoice send failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not send the invoice.",
+        ) from exc
+
+
+@router.get("/invoices/{invoice_id}", tags=["Invoices"])
+async def get_invoice_status(invoice_id: str):
+    try:
+        return await check_invoice(invoice_id)
+
+    except Exception as exc:
+        print(f"PayPal invoice lookup failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not return the invoice status.",
+        ) from exc
+
+
+@router.post("/invoices/{invoice_id}/remind", tags=["Invoices"])
+async def send_invoice_reminder(invoice_id: str):
+    try:
+        await PayPalInvoiceService().send_reminder(invoice_id)
+
+        return {
+            "status": "reminder_sent",
+            "invoice_id": invoice_id,
+        }
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    except Exception as exc:
+        print(f"PayPal reminder failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not send the reminder.",
+        ) from exc
+
+
+@router.get("/invoices", tags=["Invoices"])
+async def list_invoices():
+    try:
+        items = await PayPalInvoiceService().list_invoices()
+        return [summarize_invoice(item) for item in items]
+
+    except Exception as exc:
+        print(f"PayPal invoice list failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not list the invoices.",
+        ) from exc
+
+
+@router.post("/invoices/{invoice_id}/refund", tags=["Invoices"])
+async def refund_invoice(invoice_id: str, refund: RefundRequest):
+    try:
+        result = await PayPalInvoiceService().refund_invoice(
+            invoice_id,
+            amount=refund.amount,
+        )
+
+        return {
+            "status": "refunded",
+            "invoice_id": invoice_id,
+            "refund_id": result.get("id"),
+            "refund_status": result.get("status"),
+        }
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    except Exception as exc:
+        print(f"PayPal refund failed: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="PayPal could not refund the payment.",
+        ) from exc
+
+
+@router.get("/events", tags=["Monitor"])
+async def list_events():
+    return monitor_events
