@@ -1,6 +1,10 @@
 # Handover: where things stand
 
-Branch to start from: **`feature/frontend`**. It contains everything below, including the work from `feature/send-and-monitor`.
+Branch to start from: **`dev`**. It has `feature/send-and-monitor` and `feature/frontend` merged in.
+
+```bash
+git fetch origin && git checkout dev && git pull
+```
 
 ## Run it
 
