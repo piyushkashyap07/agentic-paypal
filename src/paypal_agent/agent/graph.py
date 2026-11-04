@@ -5,6 +5,7 @@ from paypal_agent.agent.nodes import (
     confirmation_gate,
     create_invoice_draft,
     explain_unpaid_node,
+    normalize_reply,
     refund_node,
     request_refund_node,
     send_invoice_node,
@@ -35,7 +36,7 @@ KEYWORD_ACTIONS = {
 def route_before_understanding(state: PaymentAgentState) -> str:
     """Route confirmation replies and shortcuts past the LLM."""
 
-    message = state.get("user_message", "").strip().casefold()
+    message = normalize_reply(state.get("user_message", ""))
 
     if state.get("pending_invoice_confirmation"):
         if message in {"confirm", "cancel", "no", "stop"}:

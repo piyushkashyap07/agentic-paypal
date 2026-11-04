@@ -1,9 +1,84 @@
+import asyncio
+import time
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
 import httpx
 
 from paypal_agent.config import settings
+
+# Statuses worth retrying, but only for requests that are safe to repeat.
+RETRY_STATUSES = {429, 502, 503, 504}
+MAX_ATTEMPTS = 3
+
+# Access tokens live ~9 hours; cache one per client id instead of asking
+# PayPal for a new token on every call (the monitor makes many calls).
+_token_cache: dict[str, tuple[str, float]] = {}
+
+
+def _log_paypal_error(what: str, response: httpx.Response) -> None:
+    """Log what failed without dumping the raw body (it can hold emails)."""
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+
+    if not isinstance(body, dict):
+        body = {}
+
+    issue = (body.get("details") or [{}])[0].get("issue")
+    print(
+        f"PayPal {what} failed: HTTP {response.status_code} "
+        f"name={body.get('name') or body.get('error')} "
+        f"issue={issue} debug_id={body.get('debug_id')}"
+    )
+
+
+async def send_with_retry(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    idempotent: bool | None = None,
+    **kwargs,
+) -> httpx.Response:
+    """Send a request, retrying only when repeating it cannot do harm.
+
+    - Connection failures: the request never reached PayPal, so always retry.
+    - Timeouts/5xx/429: the request may have been processed, so retry
+      only idempotent calls (GET and the token request). A repeated
+      "create invoice" or "refund" could otherwise happen twice.
+    """
+
+    if idempotent is None:
+        idempotent = method.upper() == "GET"
+
+    for attempt in range(MAX_ATTEMPTS):
+        last = attempt == MAX_ATTEMPTS - 1
+
+        try:
+            response = await client.request(method, url, **kwargs)
+
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            if last:
+                raise
+            await asyncio.sleep(0.5 * 2**attempt)
+            continue
+
+        except httpx.TransportError:
+            if last or not idempotent:
+                raise
+            await asyncio.sleep(0.5 * 2**attempt)
+            continue
+
+        if idempotent and not last and response.status_code in RETRY_STATUSES:
+            await asyncio.sleep(0.5 * 2**attempt)
+            continue
+
+        return response
+
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
 class PayPalInvoiceService:
@@ -24,9 +99,17 @@ class PayPalInvoiceService:
                 "Check PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env."
             )
 
+        cached = _token_cache.get(self.client_id)
+
+        if cached and cached[1] > time.monotonic():
+            return cached[0]
+
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
+            response = await send_with_retry(
+                client,
+                "POST",
                 f"{self.base_url}/v1/oauth2/token",
+                idempotent=True,
                 auth=(self.client_id, self.client_secret),
                 headers={
                     "Accept": "application/json",
@@ -36,12 +119,20 @@ class PayPalInvoiceService:
             )
 
             if response.is_error:
-                print("PayPal OAuth HTTP status:", response.status_code)
-                print("PayPal OAuth error response:", response.text)
+                _log_paypal_error("OAuth", response)
 
             response.raise_for_status()
 
-            token = response.json().get("access_token")
+            body = response.json()
+            token = body.get("access_token")
+
+            if token:
+                # Refresh a minute early so a token never expires mid-request.
+                lifetime = float(body.get("expires_in", 300))
+                _token_cache[self.client_id] = (
+                    token,
+                    time.monotonic() + max(lifetime - 60, 0),
+                )
 
             if not token:
                 raise RuntimeError(
@@ -156,7 +247,9 @@ class PayPalInvoiceService:
 
         # Create the invoice draft through PayPal.
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
+            response = await send_with_retry(
+                client,
+                "POST",
                 f"{self.base_url}/v2/invoicing/invoices",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -168,12 +261,7 @@ class PayPalInvoiceService:
             )
 
             if response.is_error:
-                print("PayPal invoice HTTP status:", response.status_code)
-                print("PayPal invoice error response:", response.text)
-                print(
-                    "Check PayPal Sandbox app permissions, "
-                    "account access, and the API error details."
-                )
+                _log_paypal_error("invoice creation", response)
 
             response.raise_for_status()
 
@@ -214,7 +302,8 @@ class PayPalInvoiceService:
         access_token = await self._get_access_token()
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(
+            response = await send_with_retry(
+                client,
                 method,
                 f"{self.base_url}{path}",
                 params=params,
@@ -227,8 +316,7 @@ class PayPalInvoiceService:
             )
 
             if response.is_error:
-                print("PayPal invoice HTTP status:", response.status_code)
-                print("PayPal invoice error response:", response.text)
+                _log_paypal_error(f"{method} {path}", response)
 
                 # PayPal puts the exact reason in details[0].issue.
                 try:
@@ -246,6 +334,28 @@ class PayPalInvoiceService:
             response.raise_for_status()
 
             return response.json() if response.content else {}
+
+    async def verify_webhook(self, headers: dict, event: dict) -> bool:
+        """Ask PayPal whether a webhook really came from PayPal."""
+
+        if not settings.paypal_webhook_id:
+            return False
+
+        result = await self._request(
+            "POST",
+            "/v1/notifications/verify-webhook-signature",
+            json={
+                "auth_algo": headers.get("paypal-auth-algo"),
+                "cert_url": headers.get("paypal-cert-url"),
+                "transmission_id": headers.get("paypal-transmission-id"),
+                "transmission_sig": headers.get("paypal-transmission-sig"),
+                "transmission_time": headers.get("paypal-transmission-time"),
+                "webhook_id": settings.paypal_webhook_id,
+                "webhook_event": event,
+            },
+        )
+
+        return result.get("verification_status") == "SUCCESS"
 
     async def send_invoice(self, invoice_id: str) -> dict:
         """Email a draft invoice to the customer."""

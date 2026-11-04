@@ -49,6 +49,12 @@ def get_llm() -> AsyncClient:
     )
 
 
+def normalize_reply(text: str) -> str:
+    """Make short replies comparable: "Confirm!", " CONFIRM. " -> "confirm"."""
+
+    return " ".join(text.casefold().strip(" \t\n.!?").split())
+
+
 PLAN_STEPS = [
     "Create a draft invoice",
     "Send it to the customer",
@@ -419,7 +425,7 @@ async def confirmation_gate(state: PaymentAgentState) -> dict:
             ),
         }
 
-    confirmation = state["user_message"].strip().casefold()
+    confirmation = normalize_reply(state["user_message"])
 
     if confirmation != "confirm":
         if confirmation in {"cancel", "no", "stop"}:
@@ -466,7 +472,7 @@ async def create_invoice_draft(state: PaymentAgentState) -> dict:
         PayPalInvoiceService,
     )
 
-    if state.get("user_message", "").strip().casefold() != "confirm":
+    if normalize_reply(state.get("user_message", "")) != "confirm":
         response = (
             "Invoice creation was not authorized. "
             "No invoice was created."
@@ -787,7 +793,7 @@ async def refund_node(state: PaymentAgentState) -> dict:
         PayPalInvoiceService,
     )
 
-    message = state.get("user_message", "").strip().casefold()
+    message = normalize_reply(state.get("user_message", ""))
 
     if message != "confirm refund":
         return action_result(

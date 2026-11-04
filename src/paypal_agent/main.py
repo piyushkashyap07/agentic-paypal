@@ -9,6 +9,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from paypal_agent.agent.graph import build_graph
 from paypal_agent.api.routes import router
+from paypal_agent.api.webhooks import router as webhook_router
 from paypal_agent.config import settings
 from paypal_agent.database.session import close_db, init_db
 from paypal_agent.workers.payment_monitor import run_monitor_loop
@@ -51,6 +52,7 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(webhook_router)
 
 
 @app.get("/", tags=["Health"])

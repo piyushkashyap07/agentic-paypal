@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Used when the user doesn't say when the invoice is due.
     default_due_days: int = 14
 
+    # PayPal webhooks (see CHECKPOINT.md #8). Without an id we cannot verify
+    # a webhook, so it is refused unless unverified ones are explicitly allowed.
+    paypal_webhook_id: str = ""
+    webhook_allow_unverified: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

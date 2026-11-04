@@ -236,8 +236,8 @@ async def run_monitor_now():
     require_demo_mode()
 
     try:
-        await check_all_invoices()
-        return {"status": "checked"}
+        failed = await check_all_invoices()
+        return {"status": "checked", "failed": failed}
 
     except Exception as exc:
         print(f"Monitor run failed: {type(exc).__name__}: {exc}")
@@ -257,13 +257,16 @@ async def simulate_overdue(invoice_id: str):
     await repositories.upsert_invoice(invoice_id, simulate_overdue=True)
 
     try:
-        await check_all_invoices()
+        failed = await check_all_invoices()
 
     except Exception as exc:
         print(f"Monitor run failed: {type(exc).__name__}: {exc}")
+        failed = [invoice_id]
+
+    if invoice_id in failed:
         raise HTTPException(
             status_code=502,
             detail="The invoice is marked overdue, but the check failed.",
-        ) from exc
+        )
 
     return {"status": "overdue_simulated", "invoice_id": invoice_id}

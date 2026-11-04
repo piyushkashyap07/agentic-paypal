@@ -8,7 +8,7 @@ Source of truth for scope: `PayPal_AI_Hackathon_Working_Problem_Statement (1).do
 (§ numbers below refer to it).
 
 Branch: `dev`. Effort: S < 1h, M = few hours, L = 1 day+.
-Last updated: 2026-10-31 (items 1–7 done, uncommitted on `dev`).
+Last updated: 2026-11-04 (items 1–13 done or as noted; 14 skipped; on `dev`).
 
 ## Status board
 
@@ -21,17 +21,17 @@ Last updated: 2026-10-31 (items 1–7 done, uncommitted on `dev`).
 | 5 | Persist events in SQLite | §7 | P1 | S | ✅ done |
 | 6 | Persist invoice/workflow state | §7 | P1 | M | ✅ done |
 | 7 | Extra pain point: "Why haven't I been paid?" | §10, §13 | P1 | M | ✅ done |
-| 8 | PayPal webhooks instead of polling | §7, §13 | P2 | M | ⬜ not started |
-| 9 | Merge `dev` → `main` via PR, update README | n/a | P0 | S | ⬜ not started |
-| 10 | Demo package (script, clean sandbox data, backup video) | §13 | P0 | M | ⬜ not started |
-| 11 | Hardening (error paths, raw PayPal bodies in logs, retries) | n/a | P2 | S–M | ⬜ not started |
-| 12 | Tests for new work + frontend | n/a | P2 | S | 🟡 backend tests for 1–7 added (35 pass); no frontend tests |
-| 13 | Cleanup stubs / leftovers | n/a | P3 | S | 🟡 `database/*` now used; `tools/*`, `approval_service.py`, `workflow_service.py`, `agent/routing.py`, `test.py`, `src/paypal_ai_agent/` still dead |
-| 14 | Orders/pay links, subscriptions, earnings insights | §8 | P3 | L | ⬜ not started |
+| 8 | PayPal webhooks instead of polling | §7, §13 | P2 | M | 🟡 endpoint built + unit-tested; **not tried against real PayPal** (needs a public URL, see README) |
+| 9 | Merge `dev` → `main` via PR, update README | n/a | P0 | S | 🟡 README done. **PR not opened/merged**: no `gh` here and merging to `main` is your call. Open: https://github.com/piyushkashyap07/agentic-paypal/compare/main...dev |
+| 10 | Demo package (script, clean sandbox data, backup video) | §13 | P0 | M | 🟡 `docs/DEMO.md` + `scripts/reset_demo.py` done. **Backup video not recorded** (needs a human + sandbox buyer). |
+| 11 | Hardening (error paths, raw PayPal bodies in logs, retries) | n/a | P2 | S–M | ✅ done |
+| 12 | Tests for new work + frontend | n/a | P2 | S | 🟡 backend: 56 pass (21 original + 14 for 1–7 + 21 for 8/11). **No frontend tests** (no test runner in `frontend/`; typecheck + lint only). |
+| 13 | Cleanup stubs / leftovers | n/a | P3 | S | ✅ done |
+| 14 | Orders/pay links, subscriptions, earnings insights | §8 | P3 | L | ⏭ deliberately skipped (see D14) |
 
 ## What was verified, and how
 
-- `uv run pytest` → **35 passed** (21 existing + 14 new in `tests/test_lifecycle_features.py`).
+- `uv run pytest` → **56 passed** (21 existing + 14 in `tests/test_lifecycle_features.py` + 21 in `tests/test_hardening_webhooks.py`).
   Tests use fakes and a **temp SQLite file per test** (`tests/conftest.py`), so they never touch `paypal_agent.db`.
 - `npx tsc --noEmit` and `npx eslint src` in `frontend/` → clean.
 - **Live, real Ollama + PayPal sandbox** (thread `live-1`): chat created `INV2-QX8W-BY6P-P5RX-4KN8`
@@ -60,7 +60,7 @@ Demo endpoints return 404 unless `APP_ENV=development`.
 ## Manual / API testing (Postman)
 
 `postman/paypal-agent.postman_collection.json` + `postman/local.postman_environment.json` (import both, select the
-environment). 54 requests in 8 folders: health, chat happy path (run in order), chat payload variations,
+environment). 57 requests in 9 folders: health, chat happy path (run in order), chat payload variations,
 cancel/gate behaviour, request validation, REST invoices (valid + invalid payloads), monitor/events, demo helpers.
 Scripts save `threadId` / `invoiceId` / `payLink` automatically. Set `buyerEmail` to a **US Personal** sandbox buyer.
 Folders 1, 5 and 7 create or send real **sandbox** invoices. Folders 0, 4 and 6 are safe/read-only (verified with
@@ -78,6 +78,45 @@ The create/send/refund folders were not run through newman (they spend sandbox d
 ## Decision log
 
 Newest first. Format: decision → why → rejected alternatives → how to change it.
+
+### D14. Item 14 (orders/pay links, subscriptions, earnings insights) skipped on purpose
+- **Why:** it's the L-sized "only if time is left" item, none of it is on the demo story, and each part needs its own
+  sandbox testing. Shipping it half-tested would add risk to a demo that now works end to end.
+- **If you want it later:** earnings insights is the cheapest (aggregate the `invoices` table; the dashboard Stats already
+  does a version of this in the browser). Subscriptions/orders need new PayPal permissions to be verified first.
+
+### D13. Cleanup: deleted empty stubs, moved stray scripts, fixed packaging
+- Deleted empty `tools/*`, `services/approval_service.py`, `services/workflow_service.py`, `agent/routing.py`
+  (nothing imported them; recreate when there's real code). `test.py` / `test_paypal_invoice.py` were manual
+  diagnostics, not tests, so they moved to `scripts/check_ollama.py` / `scripts/check_paypal_invoice.py`.
+- `src/paypal_ai_agent/` had been deleted from the working tree, but `pyproject.toml` still pointed at it
+  (`[project.scripts]`, and `uv_build` derives the module name from the project name), so a **fresh `uv sync` would have
+  failed to build**. Fixed with `[tool.uv.build-backend] module-name = "paypal_agent"` and removing the dead script entry.
+  Verified with `uv sync --reinstall-package paypal-ai-agent`.
+
+### D12. Retries only where repeating a call can't do harm; PayPal errors logged by field, not by body
+- **Why:** a retried "create invoice" or "refund" after a timeout could happen twice, i.e. a duplicate invoice or a
+  double refund. So `send_with_retry` (in `services/paypal_invoice_service.py`) retries: connection failures always
+  (the request never left), and timeouts / 429 / 502–504 **only for GET and the token request**, 3 attempts with backoff.
+  POSTs are never retried after the request may have been processed.
+- Raw PayPal error bodies can contain customer emails, so logs now show only status, `name`, `issue` and `debug_id`
+  (`_log_paypal_error`). The `debug_id` is what PayPal support asks for.
+- OAuth tokens are cached until a minute before expiry (the monitor was fetching a new one per call).
+- Monitor: one failing invoice no longer stops the pass; `check_all_invoices` returns the failed ids, and
+  `simulate-overdue` returns 502 if *its* invoice failed (so the demo never claims a reminder that wasn't sent).
+- Replies are normalised (`normalize_reply`): "Confirm!" / "CONFIRM." now work. Still exact-match otherwise, so
+  "yes please" does **not** confirm. That is intentional (money-moving steps need an unambiguous word).
+
+### D11. Webhooks: verify with PayPal, then re-read the invoice; polling stays on
+- **Why:** a webhook body is attacker-controlled. We (1) verify the signature through PayPal's
+  `verify-webhook-signature` using `PAYPAL_WEBHOOK_ID`, and (2) ignore the body's claims and **re-fetch the invoice**, then
+  run the same `sync_invoice` the poller uses, so events, friendly messages and "at most one reminder a day" behave
+  identically and duplicate deliveries add nothing.
+- Without `PAYPAL_WEBHOOK_ID` the endpoint answers 503, unless `WEBHOOK_ALLOW_UNVERIFIED=true` (local testing only).
+  Errors during sync return 502 so PayPal retries the delivery.
+- Polling is **not** removed: it's the safety net if a webhook is missed or the tunnel is down.
+- **Not verified:** a real delivery from PayPal. Unit tests cover verified / bad signature / forged body / duplicate /
+  other event types / bad JSON. Setup steps are in the README.
 
 ### D9. Keep calling PayPal's REST API (not MCP) for now
 - **Why:** it already works and is tested live; items 1–7 didn't need anything MCP adds.
@@ -162,7 +201,8 @@ Newest first. Format: decision → why → rejected alternatives → how to chan
 | PayPal | `services/paypal_invoice_service.py` (`due_date` → `payment_term`) |
 | API | `api/routes.py` (`/events?after=`, `/monitor/run`, `/demo/…/simulate-overdue`, `simulated_overdue` in invoice list) |
 | Frontend | `lib/api.ts`, `components/Chat.tsx`, `InvoiceList.tsx`, `ActivityFeed.tsx`, `app/dashboard/page.tsx` |
-| Tests | `tests/conftest.py`, `tests/test_lifecycle_features.py` |
+| Tests | `tests/conftest.py`, `tests/test_lifecycle_features.py`, `tests/test_hardening_webhooks.py` |
+| Items 8–13 | `api/webhooks.py`, `services/paypal_invoice_service.py` (retry, token cache, `verify_webhook`), `workers/payment_monitor.py` (`sync_invoice`), `scripts/`, `docs/DEMO.md`, `README.md`, `pyproject.toml` |
 
 ## Gotchas
 

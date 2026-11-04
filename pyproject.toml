@@ -24,8 +24,8 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
 ]
 
-[project.scripts]
-paypal-ai-agent = "paypal_ai_agent:main"
+[tool.uv.build-backend]
+module-name = "paypal_agent"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
