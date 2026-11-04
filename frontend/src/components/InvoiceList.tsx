@@ -9,6 +9,10 @@ const ACTIONS: { action: InvoiceAction; label: string; statuses: string[] }[] = 
   { action: "send", label: "Send", statuses: ["DRAFT"] },
   { action: "remind", label: "Remind", statuses: ["SENT", "UNPAID", "PARTIALLY_PAID"] },
   { action: "refund", label: "Refund", statuses: ["PAID", "PARTIALLY_REFUNDED"] },
+  // Demo helper: we can't wait days for a real due date. Hidden in production builds.
+  ...(process.env.NODE_ENV !== "production"
+    ? [{ action: "simulate-overdue" as InvoiceAction, label: "Simulate overdue", statuses: ["SENT", "UNPAID", "PARTIALLY_PAID"] }]
+    : []),
 ];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -46,7 +50,13 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
 
     try {
       await api.invoiceAction(invoice.invoice_id, action);
-      setNotice(`${action === "send" ? "Sent" : action === "remind" ? "Reminder sent for" : "Refunded"} ${invoice.invoice_id}.`);
+      const done = {
+        send: "Sent",
+        remind: "Reminder sent for",
+        refund: "Refunded",
+        "simulate-overdue": "Marked overdue and chased",
+      }[action];
+      setNotice(`${done} ${invoice.invoice_id}.`);
       onChanged();
     } catch (actionError) {
       setNotice((actionError as Error).message);
@@ -73,7 +83,11 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
           <div className="invoice" key={invoice.invoice_id}>
             <div className="invoice-top">
               <span className="invoice-amount">{formatMoney(invoice.amount, invoice.currency)}</span>
-              <span className={`badge ${invoice.status}`}>{STATUS_LABELS[invoice.status] ?? invoice.status}</span>
+              <span className={`badge ${invoice.status}`}>
+                {invoice.simulated_overdue || invoice.next_action === "send_reminder"
+                  ? "Overdue"
+                  : (STATUS_LABELS[invoice.status] ?? invoice.status)}
+              </span>
             </div>
             <div className="invoice-meta">
               <span>{invoice.customer_email}</span>
@@ -85,7 +99,7 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
               {ACTIONS.filter(({ statuses }) => statuses.includes(invoice.status)).map(({ action, label }) => (
                 <button
                   key={action}
-                  className={`pill pill-small ${action === "refund" ? "pill-outline" : "pill-blue"}`}
+                  className={`pill pill-small ${action === "refund" || action === "simulate-overdue" ? "pill-outline" : "pill-blue"}`}
                   disabled={working !== null}
                   onClick={() => run(invoice, action)}
                 >

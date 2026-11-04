@@ -1,7 +1,8 @@
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date
 
 from paypal_agent.config import settings
+from paypal_agent.database import repositories
 from paypal_agent.services.paypal_invoice_service import PayPalInvoiceService
 
 # Statuses after which there is nothing left to watch.
@@ -17,33 +18,19 @@ FINAL_STATUSES = {
 # Statuses where the customer still owes money.
 OPEN_STATUSES = {"SENT", "UNPAID", "PARTIALLY_PAID", "SCHEDULED"}
 
-# Recent things the monitor noticed or did, newest last.
-# Kept in memory, so the list resets when the server restarts.
-events: list[dict] = []
+async def record_event(invoice_id: str, message: str) -> None:
+    """Remember something the monitor noticed or did (stored in SQLite)."""
 
-# Last status seen for each invoice, used to spot changes.
-_last_status: dict[str, str] = {}
-
-# Date each invoice was last reminded, so we remind at most once a day.
-_last_reminder: dict[str, date] = {}
-
-
-def record_event(invoice_id: str, message: str) -> None:
-    """Remember something the monitor noticed or did."""
-
-    events.append(
-        {
-            "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "invoice_id": invoice_id,
-            "message": message,
-        }
-    )
-
-    del events[:-100]
     print(f"[monitor] {invoice_id}: {message}")
 
+    try:
+        await repositories.add_event(invoice_id, message)
+    except Exception as exc:
+        # Losing an activity line must never stop the monitor.
+        print(f"[monitor] could not save event: {type(exc).__name__}: {exc}")
 
-def decide_next_action(invoice: dict) -> str:
+
+def decide_next_action(invoice: dict, simulate_overdue: bool = False) -> str:
     """Decide what the agent should do next for an invoice."""
 
     status = invoice.get("status", "")
@@ -62,6 +49,9 @@ def decide_next_action(invoice: dict) -> str:
         .get("payment_term", {})
         .get("due_date")
     )
+
+    if simulate_overdue:
+        return "send_reminder"
 
     if due_date and date.fromisoformat(due_date) < date.today():
         return "send_reminder"
@@ -124,6 +114,27 @@ async def monitor_invoice(
     return result
 
 
+def status_message(record, invoice_id: str, status: str, previous: str) -> str:
+    """Plain-language line for a status change."""
+
+    who = (record.customer_name if record else None) or "The customer"
+    money = ""
+
+    if record and record.amount:
+        money = f" ({record.amount} {record.currency})"
+
+    if status in {"PAID", "MARKED_AS_PAID"}:
+        return f"{who} paid invoice {invoice_id}{money}."
+
+    if status in {"REFUNDED", "PARTIALLY_REFUNDED", "MARKED_AS_REFUNDED"}:
+        return f"Invoice {invoice_id}{money} was refunded."
+
+    if status == "CANCELLED":
+        return f"Invoice {invoice_id} was cancelled."
+
+    return f"Invoice {invoice_id} changed from {previous} to {status}."
+
+
 async def check_all_invoices() -> None:
     """Check every open invoice once and act on what has changed."""
 
@@ -132,14 +143,17 @@ async def check_all_invoices() -> None:
     for item in await service.list_invoices(page_size=50):
         invoice_id = item["id"]
         status = item.get("status", "")
-        previous = _last_status.get(invoice_id)
-        _last_status[invoice_id] = status
+        record = await repositories.get_invoice_record(invoice_id)
 
-        # The first pass only learns the current statuses.
-        if previous is not None and previous != status:
-            record_event(
-                invoice_id,
-                f"Status changed from {previous} to {status}.",
+        if record is None:
+            # An invoice we haven't seen (e.g. made in PayPal directly):
+            # learn it quietly, no "changed" event.
+            record = await repositories.upsert_invoice(invoice_id, status=status)
+        elif record.status != status:
+            previous = record.status
+            await repositories.upsert_invoice(invoice_id, status=status)
+            await record_event(
+                invoice_id, status_message(record, invoice_id, status, previous)
             )
 
         if status not in OPEN_STATUSES:
@@ -149,18 +163,19 @@ async def check_all_invoices() -> None:
         # full invoice before deciding whether it is overdue.
         invoice = await service.get_invoice(invoice_id)
 
-        if decide_next_action(invoice) != "send_reminder":
+        if decide_next_action(invoice, record.simulate_overdue) != "send_reminder":
             continue
 
         if not settings.monitor_auto_remind:
             continue
 
-        if _last_reminder.get(invoice_id) == date.today():
+        # Persisted, so a restart cannot cause a second reminder the same day.
+        if record.last_reminder_on == date.today():
             continue
 
         await service.send_reminder(invoice_id)
-        _last_reminder[invoice_id] = date.today()
-        record_event(invoice_id, "Invoice is overdue. Reminder sent.")
+        await repositories.mark_reminded(invoice_id, date.today())
+        await record_event(invoice_id, "Invoice is overdue. Reminder sent.")
 
 
 async def run_monitor_loop() -> None:

@@ -10,12 +10,15 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from paypal_agent.agent.graph import build_graph
 from paypal_agent.api.routes import router
 from paypal_agent.config import settings
+from paypal_agent.database.session import close_db, init_db
 from paypal_agent.workers.payment_monitor import run_monitor_loop
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Starting {settings.app_name}...")
+
+    await init_db()
 
     async with aiosqlite.connect(
         "paypal_agent_checkpoints.db"
@@ -34,6 +37,8 @@ async def lifespan(app: FastAPI):
 
         if monitor_task:
             monitor_task.cancel()
+
+    await close_db()
 
     print("Shutting down PayPal AI Agent...")
 

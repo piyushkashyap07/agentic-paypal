@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from ollama import AsyncClient
@@ -6,6 +7,7 @@ from ollama import AsyncClient
 from paypal_agent.agent.prompts import SYSTEM_PROMPT
 from paypal_agent.agent.state import PaymentAgentState
 from paypal_agent.config import settings
+from paypal_agent.database import repositories
 
 
 def save_conversation_turn(
@@ -47,6 +49,35 @@ def get_llm() -> AsyncClient:
     )
 
 
+PLAN_STEPS = [
+    "Create a draft invoice",
+    "Send it to the customer",
+    "Watch for payment and chase it if it goes overdue",
+]
+
+
+def plan_text(done: int) -> str:
+    """Show the agent's plan with progress: done steps, the current one, the rest."""
+
+    lines = []
+
+    for index, step in enumerate(PLAN_STEPS):
+        mark = "done" if index < done else "next" if index == done else "later"
+        symbol = {"done": "[x]", "next": "[>]", "later": "[ ]"}[mark]
+        lines.append(f"{symbol} {index + 1}. {step}")
+
+    return "My plan:\n" + "\n".join(lines)
+
+
+async def best_effort(coro) -> None:
+    """Run a persistence call; a database problem must not break the chat."""
+
+    try:
+        await coro
+    except Exception as exc:
+        print(f"Could not save to the database: {type(exc).__name__}: {exc}")
+
+
 INVOICE_ACTIONS = {
     "send_invoice",
     "check_status",
@@ -73,12 +104,13 @@ async def _understand_message(state: PaymentAgentState) -> dict:
 Return only a valid JSON object with these fields:
 {
   "intent": "create_invoice", "send_invoice", "check_status",
-            "send_reminder", "refund" or "general",
+            "send_reminder", "refund", "explain_unpaid" or "general",
   "customer_name": string or null,
   "customer_email": string or null,
   "amount": string or null,
   "currency": string or null,
   "description": string or null,
+  "due_in_days": integer or null,
   "response": string
 }
 
@@ -95,6 +127,10 @@ Rules:
   use "check_status".
 - If the user asks to remind or chase the customer, use "send_reminder".
 - If the user asks to refund or return the money, use "refund".
+- If the user asks why they have not been paid, why the customer has not
+  paid, or what is going on with an unpaid invoice, use "explain_unpaid".
+- due_in_days is how many days from today the invoice is due, e.g. "net 30"
+  or "due in two weeks". Use null when the user did not say.
 - For unrelated requests, use intent "general".
 - Do not claim an invoice has been created.
 - The response should be concise.
@@ -142,6 +178,13 @@ Rules:
             "conversation_history": save_conversation_turn(
                 state, response
             ),
+        }
+
+    # Explaining an unpaid invoice also works for invoices from earlier chats.
+    if extracted.get("intent") == "explain_unpaid":
+        return {
+            "requested_action": "explain_unpaid",
+            "needs_clarification": False,
         }
 
     # Follow-up actions work on the invoice created in this conversation.
@@ -212,6 +255,13 @@ Rules:
         if value is not None and str(value).strip():
             updates[state_key] = str(value).strip()
 
+    due_in_days = extracted.get("due_in_days")
+
+    if isinstance(due_in_days, (int, float)) and 0 <= due_in_days <= 365:
+        updates["invoice_due_date"] = (
+            date.today() + timedelta(days=int(due_in_days))
+        ).isoformat()
+
     # Existing values remain in graph state when not overwritten.
     customer_name = updates.get(
         "invoice_customer_name",
@@ -233,6 +283,16 @@ Rules:
         "invoice_description",
         state.get("invoice_description"),
     )
+
+    remembered = False
+
+    if customer_name and not customer_email:
+        known_email = await repositories.find_customer_email(customer_name)
+
+        if known_email:
+            customer_email = known_email
+            updates["invoice_customer_email"] = known_email
+            remembered = True
 
     missing = []
 
@@ -289,6 +349,23 @@ Rules:
 
         return updates
 
+    due_date = updates.get(
+        "invoice_due_date", state.get("invoice_due_date")
+    )
+
+    if not due_date:
+        due_date = (
+            date.today() + timedelta(days=settings.default_due_days)
+        ).isoformat()
+        due_note = f" (default {settings.default_due_days} days; tell me if you want different terms)"
+        updates["invoice_due_date"] = due_date
+    else:
+        due_note = ""
+
+    email_note = (
+        " (remembered from a previous invoice)" if remembered else ""
+    )
+
     # All details are present. Ask for confirmation, but do not call PayPal.
     updates["needs_clarification"] = False
     updates["pending_invoice_confirmation"] = True
@@ -297,9 +374,11 @@ Rules:
     response = (
         "Please review the invoice details:\n"
         f"- Customer: {customer_name}\n"
-        f"- Email: {customer_email}\n"
+        f"- Email: {customer_email}{email_note}\n"
         f"- Amount: {amount_text} {currency.upper()}\n"
+        f"- Due: {due_date}{due_note}\n"
         f"- Description: {description}\n\n"
+        f"{plan_text(0)}\n\n"
         "Reply CONFIRM to create this PayPal draft invoice. "
         "No email will be sent to the customer at this stage."
     )
@@ -427,6 +506,11 @@ async def create_invoice_draft(state: PaymentAgentState) -> dict:
             amount=Decimal(state["invoice_amount"]),
             currency=state["invoice_currency"].upper(),
             description=state["invoice_description"],
+            due_date=(
+                date.fromisoformat(state["invoice_due_date"])
+                if state.get("invoice_due_date")
+                else None
+            ),
         )
 
         invoice_id = result.get("id")
@@ -438,11 +522,35 @@ async def create_invoice_draft(state: PaymentAgentState) -> dict:
 
         invoice_status = result.get("status", "DRAFT")
 
+        await best_effort(
+            repositories.upsert_invoice(
+                invoice_id,
+                customer_name=state["invoice_customer_name"],
+                customer_email=state["invoice_customer_email"],
+                amount=state["invoice_amount"],
+                currency=state["invoice_currency"].upper(),
+                description=state["invoice_description"],
+                status=invoice_status,
+                due_date=(
+                    date.fromisoformat(state["invoice_due_date"])
+                    if state.get("invoice_due_date")
+                    else None
+                ),
+            )
+        )
+        await best_effort(
+            repositories.remember_customer(
+                state["invoice_customer_name"],
+                state["invoice_customer_email"],
+            )
+        )
+
         response = (
             "PayPal draft invoice created successfully.\n"
             f"Invoice ID: {invoice_id}\n"
             f"Status: {invoice_status}\n"
-            "The invoice has not been emailed to the customer. "
+            "The invoice has not been emailed to the customer.\n\n"
+            f"{plan_text(1)}\n\n"
             "Reply SEND to email it."
         )
 
@@ -559,8 +667,15 @@ async def send_invoice_node(state: PaymentAgentState) -> dict:
 
     response = (
         f"Invoice {invoice_id} was emailed to the customer.\n"
-        f"Payment link: {summary.get('pay_link')}\n"
-        "I'll keep watching it and tell you when it's paid."
+        f"Payment link: {summary.get('pay_link')}\n\n"
+        f"{plan_text(2)}\n"
+        "I'll post here when it's paid or if I have to chase it."
+    )
+
+    await best_effort(
+        repositories.upsert_invoice(
+            invoice_id, status=summary.get("status", "SENT")
+        )
     )
 
     return action_result(
@@ -715,3 +830,71 @@ async def refund_node(state: PaymentAgentState) -> dict:
         "The money is on its way back to the customer.",
         pending_refund_confirmation=False,
     )
+
+
+async def explain_unpaid_node(state: PaymentAgentState) -> dict:
+    """Explain, from PayPal's data, why an invoice has not been paid."""
+
+    from paypal_agent.services.payment_explainer import (
+        build_facts,
+        plain_summary,
+    )
+    from paypal_agent.services.paypal_invoice_service import (
+        PayPalInvoiceService,
+    )
+
+    invoice_id = state.get("invoice_id")
+
+    if not invoice_id:
+        latest = await repositories.latest_open_invoice()
+        invoice_id = latest.invoice_id if latest else None
+
+    if not invoice_id:
+        return action_result(
+            state,
+            "I don't see any unpaid invoice right now. "
+            "Tell me who to invoice and for how much.",
+        )
+
+    try:
+        invoice = await PayPalInvoiceService().get_invoice(invoice_id)
+        record = await repositories.get_invoice_record(invoice_id)
+        facts = build_facts(invoice, record)
+
+    except Exception as exc:
+        print(f"PayPal invoice lookup failed: {type(exc).__name__}: {exc}")
+
+        return action_result(
+            state,
+            "I couldn't reach PayPal to look into that. Try again soon.",
+        )
+
+    # The LLM only rewords facts we already worked out. If it fails,
+    # the plain summary is just as correct.
+    try:
+        result = await get_llm().chat(
+            model=settings.ollama_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You explain to a freelancer why an invoice has not "
+                        "been paid. Use ONLY the facts in the JSON. Do not "
+                        "invent causes, dates or amounts. No greeting. Be brief "
+                        "(at most 4 sentences) and friendly. End with one "
+                        "sentence for the suggested action: send_invoice -> "
+                        "'Reply SEND to email it.'; send_reminder -> 'Reply "
+                        "REMIND and I'll chase them.'; wait -> 'Nothing to do "
+                        "yet; I'm still watching it.'"
+                    ),
+                },
+                {"role": "user", "content": json.dumps(facts)},
+            ],
+        )
+        response = (result.message.content or "").strip() or plain_summary(facts)
+
+    except Exception as exc:
+        print(f"Explainer LLM failed: {type(exc).__name__}: {exc}")
+        response = plain_summary(facts)
+
+    return action_result(state, response, invoice_id=invoice_id)

@@ -7,10 +7,12 @@ from paypal_agent.api.schemas import (
 )
 
 from uuid import uuid4
+from paypal_agent.config import settings
+from paypal_agent.database import repositories
 from paypal_agent.services.paypal_invoice_service import PayPalInvoiceService
 from paypal_agent.workers.payment_monitor import (
+    check_all_invoices,
     check_invoice,
-    events as monitor_events,
     summarize_invoice,
 )
 
@@ -66,6 +68,23 @@ async def create_invoice_draft(
             description=invoice.description,
             customer_name=invoice.customer_name,
         )
+
+        if result.get("id"):
+            try:
+                await repositories.upsert_invoice(
+                    result["id"],
+                    customer_name=invoice.customer_name,
+                    customer_email=str(invoice.customer_email),
+                    amount=f"{invoice.amount:.2f}",
+                    currency=invoice.currency.upper(),
+                    description=invoice.description,
+                    status=result.get("status", "DRAFT"),
+                )
+                await repositories.remember_customer(
+                    invoice.customer_name, str(invoice.customer_email)
+                )
+            except Exception as exc:
+                print(f"Could not save to the database: {type(exc).__name__}: {exc}")
 
         return {
             "status": "created",
@@ -152,7 +171,15 @@ async def send_invoice_reminder(invoice_id: str):
 async def list_invoices():
     try:
         items = await PayPalInvoiceService().list_invoices()
-        return [summarize_invoice(item) for item in items]
+        simulated = await repositories.simulated_overdue_ids()
+
+        return [
+            {
+                **summarize_invoice(item),
+                "simulated_overdue": item.get("id") in simulated,
+            }
+            for item in items
+        ]
 
     except Exception as exc:
         print(f"PayPal invoice list failed: {type(exc).__name__}: {exc}")
@@ -191,5 +218,52 @@ async def refund_invoice(invoice_id: str, refund: RefundRequest):
 
 
 @router.get("/events", tags=["Monitor"])
-async def list_events():
-    return monitor_events
+async def list_events(after: int = 0):
+    """Events newer than `after` (an event id). Omit it for the latest ones."""
+
+    return await repositories.list_events(after=after)
+
+
+def require_demo_mode() -> None:
+    if settings.app_env != "development":
+        raise HTTPException(status_code=404, detail="Not found.")
+
+
+@router.post("/monitor/run", tags=["Monitor"])
+async def run_monitor_now():
+    """Run one monitor pass immediately instead of waiting for the timer."""
+
+    require_demo_mode()
+
+    try:
+        await check_all_invoices()
+        return {"status": "checked"}
+
+    except Exception as exc:
+        print(f"Monitor run failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=502, detail="The check failed.") from exc
+
+
+@router.post("/demo/invoices/{invoice_id}/simulate-overdue", tags=["Demo"])
+async def simulate_overdue(invoice_id: str):
+    """Demo only: treat this invoice as overdue and let the monitor react.
+
+    We cannot wait days in a live demo. The monitor then does exactly what
+    it would do for a really overdue invoice: send a real PayPal reminder.
+    """
+
+    require_demo_mode()
+
+    await repositories.upsert_invoice(invoice_id, simulate_overdue=True)
+
+    try:
+        await check_all_invoices()
+
+    except Exception as exc:
+        print(f"Monitor run failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="The invoice is marked overdue, but the check failed.",
+        ) from exc
+
+    return {"status": "overdue_simulated", "invoice_id": invoice_id}

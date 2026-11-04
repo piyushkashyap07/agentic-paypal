@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     monitor_interval_seconds: int = 60
     monitor_auto_remind: bool = True
 
+    # Used when the user doesn't say when the invoice is due.
+    default_due_days: int = 14
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -36,4 +39,4 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()
+settings = Settings()

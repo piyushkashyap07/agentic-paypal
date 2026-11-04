@@ -12,7 +12,7 @@ import { AgentEvent, api, Invoice } from "@/lib/api";
 export default function Dashboard() {
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [events, setEvents] = useState<AgentEvent[] | null>(null);
 
   const loadInvoices = useCallback(async () => {
     try {
@@ -62,10 +62,10 @@ export default function Dashboard() {
           <Stats invoices={invoices ?? []} />
 
           <div className="dash-grid">
-            <Chat onAgentReply={loadInvoices} />
+            <Chat onAgentReply={loadInvoices} events={events} />
             <div className="side-col">
               <InvoiceList invoices={invoices} error={invoiceError} onChanged={loadInvoices} />
-              <ActivityFeed events={events} />
+              <ActivityFeed events={events ?? []} />
             </div>
           </div>
         </div>

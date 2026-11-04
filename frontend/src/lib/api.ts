@@ -10,9 +10,11 @@ export type Invoice = {
   due_date: string | null;
   pay_link: string | null;
   next_action: string;
+  simulated_overdue?: boolean;
 };
 
 export type AgentEvent = {
+  id: number;
   time: string;
   invoice_id: string;
   message: string;
@@ -24,7 +26,7 @@ export type ChatReply = {
   status: string;
 };
 
-export type InvoiceAction = "send" | "remind" | "refund";
+export type InvoiceAction = "send" | "remind" | "refund" | "simulate-overdue";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
@@ -53,7 +55,10 @@ export const api = {
   invoiceAction: (invoiceId: string, action: InvoiceAction) =>
     request<unknown>(
       "POST",
-      `/api/invoices/${invoiceId}/${action}`,
+      // Demo-only endpoint lives outside /invoices (see CHECKPOINT.md #3).
+      action === "simulate-overdue"
+        ? `/api/demo/invoices/${invoiceId}/simulate-overdue`
+        : `/api/invoices/${invoiceId}/${action}`,
       action === "refund" ? {} : undefined,
     ),
 };

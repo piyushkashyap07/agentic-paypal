@@ -15,6 +15,8 @@ class PaymentAgentState(TypedDict):
     invoice_amount: NotRequired[str]
     invoice_currency: NotRequired[str]
     invoice_description: NotRequired[str]
+    # ISO date (YYYY-MM-DD). Computed in Python from "due in N days".
+    invoice_due_date: NotRequired[str]
 
     # Explicit confirmation workflow.
     pending_invoice_confirmation: NotRequired[bool]
@@ -29,4 +31,4 @@ class PaymentAgentState(TypedDict):
     requested_action: NotRequired[str]
 
     # Refunds move money back, so they need their own confirmation.
-    pending_refund_confirmation: NotRequired[bool]
+    pending_refund_confirmation: NotRequired[bool]

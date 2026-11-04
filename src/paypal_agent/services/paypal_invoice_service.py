@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -57,6 +58,7 @@ class PayPalInvoiceService:
         currency: str,
         description: str,
         customer_name: str = "Acme",
+        due_date: date | None = None,
     ) -> dict:
         """Create a PayPal invoice draft without emailing the customer."""
 
@@ -145,6 +147,12 @@ class PayPalInvoiceService:
                 },
             ],
         }
+
+        if due_date is not None:
+            payload["detail"]["payment_term"] = {
+                "term_type": "DUE_ON_DATE_SPECIFIED",
+                "due_date": due_date.isoformat(),
+            }
 
         # Create the invoice draft through PayPal.
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -321,4 +329,4 @@ class PayPalInvoiceService:
             "POST",
             f"/v2/payments/captures/{capture_ids[0]}/refund",
             json=body,
-        )
+        )

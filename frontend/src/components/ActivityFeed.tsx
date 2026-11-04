@@ -18,7 +18,7 @@ export default function ActivityFeed({ events }: { events: AgentEvent[] }) {
           </div>
         ) : (
           [...events].reverse().map((event, index) => (
-            <div className="event" key={`${event.time}-${index}`}>
+            <div className="event" key={event.id ?? index}>
               <div>
                 <div>{event.message}</div>
                 <div className="event-time">

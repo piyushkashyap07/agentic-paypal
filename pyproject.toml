@@ -20,7 +20,7 @@ dependencies = [
     "ollama>=0.6.3",
     "pydantic-settings>=2.16.1",
     "python-dotenv>=1.2.4",
-    "sqlalchemy>=2.1.6",
+    "sqlalchemy[asyncio]>=2.1.6",
     "uvicorn[standard]>=0.54.0",
 ]
 

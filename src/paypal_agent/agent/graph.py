@@ -4,6 +4,7 @@ from paypal_agent.agent.nodes import (
     check_status_node,
     confirmation_gate,
     create_invoice_draft,
+    explain_unpaid_node,
     refund_node,
     request_refund_node,
     send_invoice_node,
@@ -18,6 +19,7 @@ ACTION_NODES = {
     "check_status": "check_status_node",
     "send_reminder": "send_reminder_node",
     "refund": "request_refund_node",
+    "explain_unpaid": "explain_unpaid_node",
 }
 
 # One-word shortcuts that skip the LLM once an invoice exists.
@@ -26,6 +28,7 @@ KEYWORD_ACTIONS = {
     "status": "check_status",
     "remind": "send_reminder",
     "refund": "refund",
+    "why": "explain_unpaid",
 }
 
 
@@ -80,6 +83,7 @@ def build_graph(checkpointer):
     graph.add_node("send_reminder_node", send_reminder_node)
     graph.add_node("request_refund_node", request_refund_node)
     graph.add_node("refund_node", refund_node)
+    graph.add_node("explain_unpaid_node", explain_unpaid_node)
 
     graph.add_conditional_edges(
         START,

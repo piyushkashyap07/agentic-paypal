@@ -50,7 +50,7 @@ class FakeLLM:
 
     replies = {}
 
-    async def chat(self, model, messages, format):
+    async def chat(self, model, messages, format=None):
         reply = FakeLLM.replies[messages[-1]["content"]]
         return SimpleNamespace(
             message=SimpleNamespace(content=json.dumps(reply))
