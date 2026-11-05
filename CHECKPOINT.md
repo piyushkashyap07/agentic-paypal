@@ -25,13 +25,13 @@ Last updated: 2026-11-04 (items 1–13 done or as noted; 14 skipped; on `dev`).
 | 9 | Merge `dev` → `main` via PR, update README | n/a | P0 | S | 🟡 README done. **PR not opened/merged**: no `gh` here and merging to `main` is your call. Open: https://github.com/piyushkashyap07/agentic-paypal/compare/main...dev |
 | 10 | Demo package (script, clean sandbox data, backup video) | §13 | P0 | M | 🟡 `docs/DEMO.md` + `scripts/reset_demo.py` done. **Backup video not recorded** (needs a human + sandbox buyer). |
 | 11 | Hardening (error paths, raw PayPal bodies in logs, retries) | n/a | P2 | S–M | ✅ done |
-| 12 | Tests for new work + frontend | n/a | P2 | S | 🟡 backend: 56 pass (21 original + 14 for 1–7 + 21 for 8/11). **No frontend tests** (no test runner in `frontend/`; typecheck + lint only). |
+| 12 | Tests for new work + frontend | n/a | P2 | S | ✅ backend: 62 pass; frontend: vitest (`npm test` in `frontend/`), 8 tests for `lib/api.ts` and `lib/money.ts`. Component tests (Chat "Update:" rendering) are still manual and **not browser-verified**. |
 | 13 | Cleanup stubs / leftovers | n/a | P3 | S | ✅ done |
 | 14 | Orders/pay links, subscriptions, earnings insights | §8 | P3 | L | ⏭ deliberately skipped (see D14) |
 
 ## What was verified, and how
 
-- `uv run pytest` → **56 passed** (21 existing + 14 in `tests/test_lifecycle_features.py` + 21 in `tests/test_hardening_webhooks.py`).
+- `uv run pytest` → **62 passed**.
   Tests use fakes and a **temp SQLite file per test** (`tests/conftest.py`), so they never touch `paypal_agent.db`.
 - `npx tsc --noEmit` and `npx eslint src` in `frontend/` → clean.
 - **Live, real Ollama + PayPal sandbox** (thread `live-1`): chat created `INV2-QX8W-BY6P-P5RX-4KN8`
@@ -212,3 +212,9 @@ Newest first. Format: decision → why → rejected alternatives → how to chan
 - Port 3000 may be taken by another Next.js server; Next then uses 3001.
 - `uvicorn` isn't started with `--reload`: restart it after backend changes.
 - Existing sandbox rule from HANDOVER: buyers must be a **US Personal** sandbox account.
+
+## Late fixes (found by running the whole flow live)
+
+- **Token cache used `time.monotonic()`**, which stops while a Mac sleeps, so after wake-up an expired token was served and `/api/invoices` returned 502. Now wall-clock time, plus one retry with a fresh token on a 401 (safe: a 401 means PayPal did not process the call).
+- **"$450" asked for the currency.** A `$`/`€`/`£` next to a number now implies USD/EUR/GBP (Python, not the LLM).
+- **Stray CONFIRM/CANCEL with nothing pending** restarted the create flow, so a second CONFIRM could have made a duplicate invoice. They now get "Nothing is waiting for your confirmation".

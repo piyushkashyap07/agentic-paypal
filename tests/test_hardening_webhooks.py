@@ -153,6 +153,42 @@ async def test_access_token_is_cached(monkeypatch):
     service_module._token_cache.clear()
 
 
+@pytest.mark.asyncio
+async def test_expired_cached_token_is_replaced_after_a_401(monkeypatch):
+    service_module._token_cache.clear()
+    seen = []
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, **kwargs):
+            req = httpx.Request(method, url)
+            if url.endswith("/oauth2/token"):
+                token = f"tok{len([u for u in seen if u.endswith('/oauth2/token')]) + 1}"
+                seen.append(url)
+                return httpx.Response(200, json={"access_token": token, "expires_in": 3600}, request=req)
+            auth = kwargs["headers"]["Authorization"]
+            seen.append(url)
+            if auth == "Bearer stale":
+                return httpx.Response(401, json={"name": "AUTHENTICATION_FAILURE"}, request=req)
+            return httpx.Response(200, json={"ok": auth}, request=req)
+
+    monkeypatch.setattr(service_module.httpx, "AsyncClient", lambda **kw: FakeClient())
+    monkeypatch.setattr(settings, "paypal_client_id", "id")
+    monkeypatch.setattr(settings, "paypal_client_secret", "secret")
+    # A cached token that looks valid but PayPal no longer accepts.
+    service_module._token_cache["id"] = ("stale", service_module.time.time() + 1000)
+
+    result = await PayPalInvoiceService()._request("GET", "/v2/invoicing/invoices")
+
+    assert result == {"ok": "Bearer tok1"}
+    service_module._token_cache.clear()
+
+
 # --- monitor isolation -----------------------------------------------------------
 
 class FakePayPal:
@@ -289,3 +325,20 @@ def test_other_events_and_bad_json_are_handled(paypal, monkeypatch):
         other = client.post("/api/webhooks/paypal", json={"event_type": "PAYMENT.SALE.COMPLETED"})
         assert other.json()["status"] == "ignored"
         assert client.post("/api/webhooks/paypal", content="not json").status_code == 400
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [("invoice Bob for $450", "USD"), ("charge £ 20", "GBP"), ("€99 please", "EUR"), ("450 dollars", None)],
+)
+def test_currency_symbol_implies_currency(text, expected):
+    from paypal_agent.agent.nodes import currency_from_symbol
+
+    assert currency_from_symbol(text) == expected
+
+
+def test_stray_confirm_with_nothing_pending_is_answered_not_restarted():
+    state = {"user_message": "CONFIRM", "invoice_id": "INV2-X", "invoice_amount": "450"}
+
+    assert route_before_understanding(state) == "nothing_pending_node"
+    assert route_before_understanding({**state, "pending_invoice_confirmation": True}) == "confirmation_gate"

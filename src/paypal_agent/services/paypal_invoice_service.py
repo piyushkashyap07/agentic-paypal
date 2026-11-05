@@ -11,6 +11,8 @@ from paypal_agent.config import settings
 RETRY_STATUSES = {429, 502, 503, 504}
 MAX_ATTEMPTS = 3
 
+# Wall-clock expiry on purpose: time.monotonic() stops while a laptop
+# sleeps, which would keep serving an expired token after wake-up.
 # Access tokens live ~9 hours; cache one per client id instead of asking
 # PayPal for a new token on every call (the monitor makes many calls).
 _token_cache: dict[str, tuple[str, float]] = {}
@@ -101,7 +103,7 @@ class PayPalInvoiceService:
 
         cached = _token_cache.get(self.client_id)
 
-        if cached and cached[1] > time.monotonic():
+        if cached and cached[1] > time.time():
             return cached[0]
 
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -131,7 +133,7 @@ class PayPalInvoiceService:
                 lifetime = float(body.get("expires_in", 300))
                 _token_cache[self.client_id] = (
                     token,
-                    time.monotonic() + max(lifetime - 60, 0),
+                    time.time() + max(lifetime - 60, 0),
                 )
 
             if not token:
@@ -299,21 +301,30 @@ class PayPalInvoiceService:
     ) -> dict:
         """Call any PayPal REST endpoint and return the JSON body."""
 
-        access_token = await self._get_access_token()
-
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await send_with_retry(
-                client,
-                method,
-                f"{self.base_url}{path}",
-                params=params,
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
-                json=json,
-            )
+            for attempt in range(2):
+                access_token = await self._get_access_token()
+
+                response = await send_with_retry(
+                    client,
+                    method,
+                    f"{self.base_url}{path}",
+                    params=params,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    json=json,
+                )
+
+                # A 401 means PayPal did not process the call, so one retry
+                # with a fresh token is safe even for POSTs.
+                if response.status_code == 401 and attempt == 0:
+                    _token_cache.pop(self.client_id, None)
+                    continue
+
+                break
 
             if response.is_error:
                 _log_paypal_error(f"{method} {path}", response)

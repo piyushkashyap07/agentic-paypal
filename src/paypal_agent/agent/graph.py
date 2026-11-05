@@ -5,6 +5,7 @@ from paypal_agent.agent.nodes import (
     confirmation_gate,
     create_invoice_draft,
     explain_unpaid_node,
+    nothing_pending_node,
     normalize_reply,
     refund_node,
     request_refund_node,
@@ -33,6 +34,9 @@ KEYWORD_ACTIONS = {
 }
 
 
+BARE_CONFIRMATIONS = {"confirm", "confirm refund", "cancel", "no", "stop"}
+
+
 def route_before_understanding(state: PaymentAgentState) -> str:
     """Route confirmation replies and shortcuts past the LLM."""
 
@@ -45,6 +49,10 @@ def route_before_understanding(state: PaymentAgentState) -> str:
     if state.get("pending_refund_confirmation"):
         if message in {"confirm refund", "cancel", "no", "stop"}:
             return "refund_node"
+
+    # A bare confirmation with nothing pending must never restart a workflow.
+    if message in BARE_CONFIRMATIONS:
+        return "nothing_pending_node"
 
     if state.get("invoice_id") and message in KEYWORD_ACTIONS:
         return ACTION_NODES[KEYWORD_ACTIONS[message]]
@@ -85,6 +93,7 @@ def build_graph(checkpointer):
     graph.add_node("request_refund_node", request_refund_node)
     graph.add_node("refund_node", refund_node)
     graph.add_node("explain_unpaid_node", explain_unpaid_node)
+    graph.add_node("nothing_pending_node", nothing_pending_node)
 
     graph.add_conditional_edges(
         START,
@@ -93,6 +102,7 @@ def build_graph(checkpointer):
             "understand_request": "understand_request",
             "confirmation_gate": "confirmation_gate",
             "refund_node": "refund_node",
+            "nothing_pending_node": "nothing_pending_node",
             **{node: node for node in ACTION_NODES.values()},
         },
     )
@@ -117,7 +127,7 @@ def build_graph(checkpointer):
 
     graph.add_edge("create_invoice_draft", END)
 
-    for node in [*ACTION_NODES.values(), "refund_node"]:
+    for node in [*ACTION_NODES.values(), "refund_node", "nothing_pending_node"]:
         graph.add_edge(node, END)
 
     return graph.compile(checkpointer=checkpointer)

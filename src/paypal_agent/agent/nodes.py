@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -90,6 +91,17 @@ INVOICE_ACTIONS = {
     "send_reminder",
     "refund",
 }
+
+
+CURRENCY_SYMBOLS = {"$": "USD", "€": "EUR", "£": "GBP"}
+
+
+def currency_from_symbol(text: str) -> str | None:
+    """Return the currency implied by a symbol next to a number, if any."""
+
+    match = re.search(r"([$€£])\s?\d", text)
+
+    return CURRENCY_SYMBOLS[match.group(1)] if match else None
 
 
 async def understand_request(state: PaymentAgentState) -> dict:
@@ -260,6 +272,13 @@ Rules:
 
         if value is not None and str(value).strip():
             updates[state_key] = str(value).strip()
+
+    # "$450" already says the currency; don't make the user repeat it.
+    if not updates.get("invoice_currency") and not state.get("invoice_currency"):
+        symbol_currency = currency_from_symbol(state["user_message"])
+
+        if symbol_currency:
+            updates["invoice_currency"] = symbol_currency
 
     due_in_days = extracted.get("due_in_days")
 
@@ -904,3 +923,18 @@ async def explain_unpaid_node(state: PaymentAgentState) -> dict:
         response = plain_summary(facts)
 
     return action_result(state, response, invoice_id=invoice_id)
+
+
+async def nothing_pending_node(state: PaymentAgentState) -> dict:
+    """Answer a stray CONFIRM/CANCEL so it can never restart a workflow."""
+
+    response = (
+        "Nothing is waiting for your confirmation right now. "
+        "Tell me who to invoice and for how much to start one."
+    )
+
+    return {
+        "response": response,
+        "needs_clarification": False,
+        "conversation_history": save_conversation_turn(state, response),
+    }
