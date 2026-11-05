@@ -25,7 +25,8 @@ PYTHONPATH=src uv run uvicorn paypal_agent.main:app --port 8000   # docs at /doc
 cd frontend && npm install && npm run dev      # http://localhost:3000/dashboard
 ```
 
-Tests (no keys needed, they use fakes and a temp database): `uv run pytest`
+Tests (no keys needed, they use fakes and a temp database): `uv run pytest`  
+Frontend tests: `cd frontend && npm test` (vitest, no backend needed).
 
 ## Settings (`.env`)
 

@@ -25,7 +25,7 @@ Last updated: 2026-11-04 (items 1–13 done or as noted; 14 skipped; on `dev`).
 | 9 | Merge `dev` → `main` via PR, update README | n/a | P0 | S | 🟡 README done. **PR not opened/merged**: no `gh` here and merging to `main` is your call. Open: https://github.com/piyushkashyap07/agentic-paypal/compare/main...dev |
 | 10 | Demo package (script, clean sandbox data, backup video) | §13 | P0 | M | 🟡 `docs/DEMO.md` + `scripts/reset_demo.py` done. **Backup video not recorded** (needs a human + sandbox buyer). |
 | 11 | Hardening (error paths, raw PayPal bodies in logs, retries) | n/a | P2 | S–M | ✅ done |
-| 12 | Tests for new work + frontend | n/a | P2 | S | ✅ backend: 62 pass; frontend: vitest (`npm test` in `frontend/`), 8 tests for `lib/api.ts` and `lib/money.ts`. Component tests (Chat "Update:" rendering) are still manual and **not browser-verified**. |
+| 12 | Tests for new work + frontend | n/a | P2 | S | ✅ backend: 62 pass; frontend: vitest + Testing Library (`npm test` in `frontend/`), 17 tests covering `lib/api.ts`, `lib/money.ts`, `Chat` (history skipped, "Update:" messages, no duplicates, errors, links) and `InvoiceList` (badges, per-status actions). Still not checked by eye in a real browser. |
 | 13 | Cleanup stubs / leftovers | n/a | P3 | S | ✅ done |
 | 14 | Orders/pay links, subscriptions, earnings insights | §8 | P3 | L | ⏭ deliberately skipped (see D14) |
 
