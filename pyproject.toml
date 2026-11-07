@@ -17,15 +17,16 @@ dependencies = [
     "langchain-openai>=1.7.3",
     "langgraph>=1.2.18",
     "langgraph-checkpoint-sqlite>=3.1.2",
+    "mcp>=1.9",
     "ollama>=0.6.3",
     "pydantic-settings>=2.16.1",
     "python-dotenv>=1.2.4",
-    "sqlalchemy>=2.1.6",
+    "sqlalchemy[asyncio]>=2.1.6",
     "uvicorn[standard]>=0.54.0",
 ]
 
-[project.scripts]
-paypal-ai-agent = "paypal_ai_agent:main"
+[tool.uv.build-backend]
+module-name = "paypal_agent"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]

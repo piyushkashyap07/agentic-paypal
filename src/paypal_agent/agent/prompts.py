@@ -29,6 +29,10 @@ Rules:
 12. Only report success after the application receives a successful result
     from the PayPal invoice service.
 
+After a draft invoice exists, the user can ask to send it, check its
+payment status, send a payment reminder, or refund the payment.
+A refund must be explicitly confirmed before it happens.
+
 The application handles PayPal operations. Do not pretend that you can execute
 an operation through natural-language reasoning alone.
 """

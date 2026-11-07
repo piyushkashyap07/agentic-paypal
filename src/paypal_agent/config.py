@@ -22,7 +22,26 @@ class Settings(BaseSettings):
     paypal_client_secret: str = ""
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
 
+    # How invoice calls reach PayPal: "mcp" (official PayPal MCP server)
+    # or "rest" (direct REST API). Webhook verification always uses REST,
+    # because PayPal MCP has no tool for it.
+    paypal_transport: str = "mcp"
+    paypal_mcp_package: str = "@paypal/mcp@1.8.1"
+
     database_url: str = "sqlite+aiosqlite:///./paypal_agent.db"
+
+    # Background payment monitor.
+    monitor_enabled: bool = True
+    monitor_interval_seconds: int = 60
+    monitor_auto_remind: bool = True
+
+    # Used when the user doesn't say when the invoice is due.
+    default_due_days: int = 14
+
+    # PayPal webhooks (see CHECKPOINT.md #8). Without an id we cannot verify
+    # a webhook, so it is refused unless unverified ones are explicitly allowed.
+    paypal_webhook_id: str = ""
+    webhook_allow_unverified: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -31,4 +50,4 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()
+settings = Settings()

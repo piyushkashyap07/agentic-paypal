@@ -35,3 +35,14 @@ class CreateInvoiceRequest(BaseModel):
     amount: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
     currency: str = Field(default="USD", pattern=r"^[A-Za-z]{3}$")
     description: str = Field(min_length=1, max_length=500)
+
+
+class RefundRequest(BaseModel):
+    """Leave amount empty to refund the full payment."""
+
+    amount: Decimal | None = Field(
+        default=None,
+        gt=0,
+        max_digits=10,
+        decimal_places=2,
+    )
