@@ -136,6 +136,12 @@ Rules:
 - Extract only facts supplied by the user.
 - Never invent invoice details.
 - Use null for fields not supplied in the conversation.
+- The description is the work or goods the user mentions, however casually.
+  "I finished the logo for Bluebird" -> "Logo design";
+  "Acme owes me for the website" -> "Website work".
+  This is a fact the user supplied, not an invented detail.
+- The customer is who the work was for or who owes the money
+  ("for Bluebird Cafe", "Acme owes me").
 - Use a three-letter currency code when explicitly provided.
 - If the conversation is already about preparing an invoice,
   continue processing the invoice when the user supplies missing details.

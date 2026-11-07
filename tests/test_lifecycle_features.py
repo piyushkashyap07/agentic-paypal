@@ -230,7 +230,8 @@ def test_simulate_overdue_endpoint(agent, monkeypatch):
         assert FakePayPal.reminders == ["INV2-FAKE"]
 
         events = client.get("/api/events").json()
-        assert events[-1]["message"] == "Invoice is overdue. Reminder sent."
+        assert "INV2-FAKE" in events[-1]["message"]
+        assert events[-1]["message"].endswith("is overdue. Reminder sent.")
         assert client.get(f"/api/events?after={events[-1]['id']}").json() == []
 
         invoices = client.get("/api/invoices").json()

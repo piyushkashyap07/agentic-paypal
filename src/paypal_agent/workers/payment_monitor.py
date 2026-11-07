@@ -135,6 +135,23 @@ def status_message(record, invoice_id: str, status: str, previous: str) -> str:
     return f"Invoice {invoice_id} changed from {previous} to {status}."
 
 
+def overdue_message(record, invoice: dict) -> str:
+    """Plain-language line for an overdue reminder, naming who and how much."""
+
+    invoice_id = invoice.get("id")
+    who = record.customer_name if record else None
+    amount = invoice.get("amount", {}).get("value")
+    currency = invoice.get("detail", {}).get("currency_code")
+
+    if record and record.amount:
+        amount, currency = record.amount, record.currency
+
+    label = f"{who}'s invoice" if who else "Invoice"
+    money = f" ({amount} {currency})" if amount else ""
+
+    return f"{label} {invoice_id}{money} is overdue. Reminder sent."
+
+
 async def check_all_invoices() -> list[str]:
     """Check every open invoice once and act on what has changed.
 
@@ -199,7 +216,7 @@ async def sync_invoice(
 
     await service.send_reminder(invoice_id)
     await repositories.mark_reminded(invoice_id, date.today())
-    await record_event(invoice_id, "Invoice is overdue. Reminder sent.")
+    await record_event(invoice_id, overdue_message(record, invoice))
 
 
 async def run_monitor_loop() -> None:
