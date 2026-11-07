@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from paypal_agent.config import settings
+from paypal_agent.database import repositories
+from paypal_agent.services.paypal_mcp_client import mcp_client
 
 # Statuses worth retrying, but only for requests that are safe to repeat.
 RETRY_STATUSES = {429, 502, 503, 504}
@@ -83,6 +85,30 @@ async def send_with_retry(
     raise RuntimeError("unreachable")  # pragma: no cover
 
 
+async def _fill_due_date_from_record(invoice: dict) -> None:
+    """Add the due date we stored when PayPal has none (MCP-created invoices).
+
+    The rest of the app reads detail.payment_term.due_date, so filling it in
+    here keeps the monitor and the "why unpaid" explainer working unchanged.
+    """
+
+    detail = invoice.setdefault("detail", {})
+
+    if detail.get("payment_term", {}).get("due_date") or not invoice.get("id"):
+        return
+
+    try:
+        record = await repositories.get_invoice_record(invoice["id"])
+    except Exception as exc:
+        print(f"Could not read due date for {invoice['id']}: {exc}")
+        return
+
+    if record and record.due_date:
+        detail.setdefault("payment_term", {})["due_date"] = (
+            record.due_date.isoformat()
+        )
+
+
 class PayPalInvoiceService:
     """Create draft invoices using the PayPal Invoicing API."""
 
@@ -91,6 +117,7 @@ class PayPalInvoiceService:
         self.client_id = settings.paypal_client_id
         self.client_secret = settings.paypal_client_secret
         self.invoicer_email = settings.paypal_invoicer_email
+        self.use_mcp = settings.paypal_transport == "mcp"
 
     async def _get_access_token(self) -> str:
         """Obtain an OAuth access token from PayPal."""
@@ -203,6 +230,16 @@ class PayPalInvoiceService:
 
         amount_value = f"{amount:.2f}"
 
+        if self.use_mcp:
+            return await self._create_draft_invoice_mcp(
+                customer_email=customer_email,
+                customer_name=customer_name.strip(),
+                amount_value=amount_value,
+                currency=currency,
+                description=description.strip(),
+                due_date=due_date,
+            )
+
         # Obtain a PayPal access token.
         access_token = await self._get_access_token()
 
@@ -275,6 +312,67 @@ class PayPalInvoiceService:
             )
 
             return result
+
+    async def _create_draft_invoice_mcp(
+        self,
+        *,
+        customer_email: str,
+        customer_name: str,
+        amount_value: str,
+        currency: str,
+        description: str,
+        due_date: date | None,
+    ) -> dict:
+        """Create the draft through the PayPal MCP `create_invoice` tool."""
+
+        # The MCP tool has no payment-term field, so the due date goes in the
+        # note for the customer and in our own record for the monitor
+        # (see _fill_due_date_from_record).
+        note = "Thank you for your business."
+
+        if due_date is not None:
+            note += f" Payment is due by {due_date.isoformat()}."
+
+        result = await mcp_client.call(
+            "create_invoice",
+            {
+                "currency_code": currency,
+                "note": note,
+                "invoicer_email_address": self.invoicer_email,
+                "invoicer_given_name": "Seller",
+                "invoicer_surname": "Business",
+                "primary_recipients": [
+                    {
+                        "billing_info": {
+                            "email_address": customer_email,
+                            "name": {"given_name": customer_name},
+                        },
+                    },
+                ],
+                "items": [
+                    {
+                        "name": description,
+                        "quantity": "1",
+                        "unit_amount": {
+                            "currency_code": currency,
+                            "value": amount_value,
+                        },
+                    },
+                ],
+            },
+        )
+
+        # The tool returns only a link to the new invoice
+        # ({"rel": "self", "href": ".../invoices/INV2-..."}), so read the
+        # id from it and fetch the full invoice.
+        invoice_id = result.get("id") or result.get("href", "").rsplit("/", 1)[-1]
+
+        print(f"PayPal invoice draft created via MCP. Invoice ID: {invoice_id}")
+
+        if not invoice_id:
+            return result
+
+        return await mcp_client.call("get_invoice", {"invoice_id": invoice_id})
 
     async def _invoice_request(
         self,
@@ -371,6 +469,12 @@ class PayPalInvoiceService:
     async def send_invoice(self, invoice_id: str) -> dict:
         """Email a draft invoice to the customer."""
 
+        if self.use_mcp:
+            return await mcp_client.call(
+                "send_invoice",
+                {"invoice_id": invoice_id, "send_to_recipient": True},
+            )
+
         return await self._invoice_request(
             "POST",
             f"/{invoice_id}/send",
@@ -380,22 +484,48 @@ class PayPalInvoiceService:
     async def get_invoice(self, invoice_id: str) -> dict:
         """Fetch the latest invoice details, including its status."""
 
+        if self.use_mcp:
+            invoice = await mcp_client.call(
+                "get_invoice", {"invoice_id": invoice_id}
+            )
+            await _fill_due_date_from_record(invoice)
+
+            return invoice
+
         return await self._invoice_request("GET", f"/{invoice_id}")
 
     async def send_reminder(self, invoice_id: str) -> dict:
         """Send a payment reminder for an invoice that is not yet paid."""
 
+        reminder = {
+            "subject": "Reminder: your invoice is waiting",
+            "note": "This is a friendly reminder to pay your invoice.",
+        }
+
+        if self.use_mcp:
+            return await mcp_client.call(
+                "send_invoice_reminder", {"invoice_id": invoice_id, **reminder}
+            )
+
         return await self._invoice_request(
             "POST",
             f"/{invoice_id}/remind",
-            json={
-                "subject": "Reminder: your invoice is waiting",
-                "note": "This is a friendly reminder to pay your invoice.",
-            },
+            json=reminder,
         )
 
     async def list_invoices(self, page_size: int = 20) -> list[dict]:
         """List the merchant's most recent invoices."""
+
+        if self.use_mcp:
+            result = await mcp_client.call(
+                "list_invoices", {"page": 1, "page_size": page_size}
+            )
+            items = result.get("items", [])
+
+            for item in items:
+                await _fill_due_date_from_record(item)
+
+            return items
 
         result = await self._invoice_request(
             "GET",
@@ -445,6 +575,12 @@ class PayPalInvoiceService:
                 "currency_code": invoice["detail"]["currency_code"],
                 "value": f"{amount:.2f}",
             }
+
+        if self.use_mcp:
+            return await mcp_client.call(
+                "create_refund",
+                {"capture_id": capture_ids[0], "invoice_id": invoice_id, **body},
+            )
 
         return await self._request(
             "POST",
