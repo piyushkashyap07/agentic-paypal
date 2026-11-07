@@ -11,6 +11,8 @@ def temp_database(tmp_path, monkeypatch):
     monkeypatch.setattr(
         settings, "database_url", f"sqlite+aiosqlite:///{tmp_path}/test.db"
     )
+    # Tests never start the real PayPal MCP server; MCP tests fake mcp_client.
+    monkeypatch.setattr(settings, "paypal_transport", "rest")
     session._engine = session._factory = None
     session._ready = False
 

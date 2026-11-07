@@ -70,14 +70,28 @@ The create/send/refund folders were not run through newman (they spend sandbox d
 ## Open team decisions (from the PS, §13)
 
 - **Target user:** freelancer (assumed in all UX copy until decided otherwise).
-- **MCP vs REST:** the PS says "PayPal MCP / Agent Toolkit"; the code calls the REST API directly.
-  Decide before judging if this matters; see decision D9.
+- **MCP vs REST:** decided: PayPal calls go through the **PayPal MCP server** (D15). REST stays as a fallback.
 - **Which extra pain point:** we picked "Why haven't I been paid?" (D7). Disputes remain the stronger story if
   sandbox disputes can be created. Team can still swap.
 
 ## Decision log
 
 Newest first. Format: decision → why → rejected alternatives → how to change it.
+
+### D15. PayPal calls go through the official PayPal MCP server
+- **Why:** the problem statement's architecture is "AI Agent → PayPal MCP/Agent Tools → PayPal". Using PayPal's
+  own MCP server makes that true instead of a slide claim.
+- **How:** `services/paypal_mcp_client.py` starts `npx @paypal/mcp@1.8.1 --tools=all` once, keeps one stdio
+  connection (owned by a background task, as the MCP SDK requires), and restarts it before the 9-hour token expires.
+  `PayPalInvoiceService` keeps the same methods, so nodes/routes/monitor didn't change. `PAYPAL_TRANSPORT=rest`
+  switches back to direct REST.
+- **Gaps in MCP, and what we did:** `create_invoice` has no payment-term field → due date goes in the invoice note +
+  our DB, and `get_invoice`/`list_invoices` fill it back in. `create_invoice` returns only a link → we read the id
+  and call `get_invoice`. Errors come back as `{"ok": false}` in a normal result → the client checks for it.
+  No tool for webhook verification → stays REST.
+- **Verified live (sandbox):** chat create → send → status → "why unpaid" (due date shown), remind, list. A refund
+  over MCP reached PayPal and returned PayPal's real error (that invoice was already fully refunded); a successful
+  MCP refund still needs a newly paid invoice.
 
 ### D14. Item 14 (orders/pay links, subscriptions, earnings insights) skipped on purpose
 - **Why:** it's the L-sized "only if time is left" item, none of it is on the demo story, and each part needs its own

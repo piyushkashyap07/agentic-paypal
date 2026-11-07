@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     paypal_client_secret: str = ""
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
 
+    # How invoice calls reach PayPal: "mcp" (official PayPal MCP server)
+    # or "rest" (direct REST API). Webhook verification always uses REST,
+    # because PayPal MCP has no tool for it.
+    paypal_transport: str = "mcp"
+    paypal_mcp_package: str = "@paypal/mcp@1.8.1"
+
     database_url: str = "sqlite+aiosqlite:///./paypal_agent.db"
 
     # Background payment monitor.

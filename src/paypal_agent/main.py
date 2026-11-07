@@ -12,6 +12,7 @@ from paypal_agent.api.routes import router
 from paypal_agent.api.webhooks import router as webhook_router
 from paypal_agent.config import settings
 from paypal_agent.database.session import close_db, init_db
+from paypal_agent.services.paypal_mcp_client import mcp_client
 from paypal_agent.workers.payment_monitor import run_monitor_loop
 
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
         if monitor_task:
             monitor_task.cancel()
 
+    await mcp_client.close()
     await close_db()
 
     print("Shutting down PayPal AI Agent...")
