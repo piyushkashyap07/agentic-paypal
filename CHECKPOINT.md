@@ -7,8 +7,19 @@ this file explains what is done, what is left, and **why** we chose what we chos
 Source of truth for scope: `PayPal_AI_Hackathon_Working_Problem_Statement (1).docx`
 (§ numbers below refer to it).
 
-Branch: `dev`. Effort: S < 1h, M = few hours, L = 1 day+.
-Last updated: 2026-11-04 (items 1–13 done or as noted; 14 skipped; on `dev`).
+Branch: `dev` (merged into `main`). Effort: S < 1h, M = few hours, L = 1 day+.
+Last updated: 2026-11-08 (items 1–15 done or as noted; subscriptions skipped; on `dev` and `main`).
+
+## Updating to the latest code (since the PayPal MCP switch, D15)
+
+1. `git checkout main && git pull`, then `uv sync` (new dependency: `mcp`).
+2. Install **Node 20+**: the backend starts the PayPal MCP server with `npx`.
+3. In your `.env` add `PAYPAL_TRANSPORT=mcp` and set
+   `DATABASE_URL=sqlite+aiosqlite:///./paypal_agent.db` (an empty `DATABASE_URL=` crashes startup).
+   Both are in `.env.example`.
+4. PayPal developer dashboard → Apps & Credentials → your app → Features: tick **Transaction search** and
+   **Customer disputes**, then Save. Transaction search can take hours to activate; until then earnings come from
+   paid invoices. Shipment tracking isn't offered for our sandbox app.
 
 ## Status board
 
