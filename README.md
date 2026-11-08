@@ -52,6 +52,18 @@ before the access token expires (`services/paypal_mcp_client.py`).
 | Send / remind | `send_invoice` / `send_invoice_reminder` |
 | Status / list | `get_invoice` / `list_invoices` |
 | Refund | `get_invoice` (find capture id) → `create_refund` |
+| Cancel a sent invoice | `cancel_sent_invoice` |
+| QR code to pay | `generate_invoice_qr_code` |
+| Refund status | `get_invoice` (refund ids) → `get_refund` |
+| Earnings | `list_transactions` (falls back to paid invoices if the app lacks Transaction Search) |
+| Disputes | `list_disputes`, `get_dispute`, `accept_dispute_claim` |
+| Pay links (no invoice) | `create_order` → `get_order` → `pay_order` once the buyer approved |
+| Shipment tracking | `create_shipment_tracking`, `get_shipment_tracking` (needs the app's tracking permission) |
+
+These extra features (`services/paypal_commerce_service.py`) only exist on the MCP route.
+In chat: "how much did I earn this month?", "any disputes?", "explain dispute PP-D-…",
+"accept dispute PP-D-…" (then **CONFIRM ACCEPT**), "cancel this invoice" (then **CONFIRM CANCEL**), "QR",
+"refund status", "add tracking 1Z… UPS", "payment link for $50 for a consultation", "was the payment link paid?".
 
 MCP's `create_invoice` has no due-date field, so the due date is written in the invoice note and stored in
 our database; `get_invoice` / `list_invoices` fill it back in so the monitor and "why unpaid" still work.

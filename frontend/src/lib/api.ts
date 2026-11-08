@@ -26,7 +26,29 @@ export type ChatReply = {
   status: string;
 };
 
-export type InvoiceAction = "send" | "remind" | "refund" | "simulate-overdue";
+export type InvoiceAction = "send" | "remind" | "refund" | "cancel" | "simulate-overdue";
+
+export type Earnings = {
+  days: number;
+  from: string;
+  to: string;
+  received: string;
+  refunded: string;
+  net: string;
+  payments: number;
+  currency: string;
+  source: "transactions" | "invoices";
+};
+
+export type Dispute = {
+  dispute_id: string;
+  reason: string | null;
+  status: string | null;
+  amount: string | null;
+  currency: string | null;
+  respond_by: string | null;
+  needs_action: boolean;
+};
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, {
@@ -51,6 +73,10 @@ export const api = {
   listInvoices: () => request<Invoice[]>("GET", "/api/invoices"),
 
   listEvents: () => request<AgentEvent[]>("GET", "/api/events"),
+
+  earnings: (days = 30) => request<Earnings>("GET", `/api/earnings?days=${days}`),
+
+  listDisputes: () => request<Dispute[]>("GET", "/api/disputes"),
 
   invoiceAction: (invoiceId: string, action: InvoiceAction) =>
     request<unknown>(

@@ -20,6 +20,8 @@ class PayPalMCPError(RuntimeError):
     def __init__(self, tool: str, status: int | None, message: str):
         super().__init__(f"PayPal MCP {tool} failed ({status}): {message}")
         self.status = status
+        # PayPal's messages look like "<general text>: <specific reason>".
+        self.reason = message.rsplit(": ", 1)[-1].strip()
 
 
 class PayPalMCPClient:

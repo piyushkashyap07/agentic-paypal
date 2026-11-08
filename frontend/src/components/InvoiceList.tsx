@@ -9,6 +9,7 @@ const ACTIONS: { action: InvoiceAction; label: string; statuses: string[] }[] = 
   { action: "send", label: "Send", statuses: ["DRAFT"] },
   { action: "remind", label: "Remind", statuses: ["SENT", "UNPAID", "PARTIALLY_PAID"] },
   { action: "refund", label: "Refund", statuses: ["PAID", "PARTIALLY_REFUNDED"] },
+  { action: "cancel", label: "Cancel", statuses: ["SENT", "UNPAID"] },
   // Demo helper: we can't wait days for a real due date. Hidden in production builds.
   ...(process.env.NODE_ENV !== "production"
     ? [{ action: "simulate-overdue" as InvoiceAction, label: "Simulate overdue", statuses: ["SENT", "UNPAID", "PARTIALLY_PAID"] }]
@@ -45,6 +46,13 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
       return;
     }
 
+    if (
+      action === "cancel" &&
+      !window.confirm(`Cancel invoice ${invoice.invoice_id}? The customer will be told no payment is needed.`)
+    ) {
+      return;
+    }
+
     setWorking(invoice.invoice_id + action);
     setNotice(null);
 
@@ -54,6 +62,7 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
         send: "Sent",
         remind: "Reminder sent for",
         refund: "Refunded",
+        cancel: "Cancelled",
         "simulate-overdue": "Marked overdue and chased",
       }[action];
       setNotice(`${done} ${invoice.invoice_id}.`);
@@ -99,7 +108,7 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
               {ACTIONS.filter(({ statuses }) => statuses.includes(invoice.status)).map(({ action, label }) => (
                 <button
                   key={action}
-                  className={`pill pill-small ${action === "refund" || action === "simulate-overdue" ? "pill-outline" : "pill-blue"}`}
+                  className={`pill pill-small ${action === "send" || action === "remind" ? "pill-blue" : "pill-outline"}`}
                   disabled={working !== null}
                   onClick={() => run(invoice, action)}
                 >
@@ -109,6 +118,16 @@ export default function InvoiceList({ invoices, error, onChanged }: Props) {
               {invoice.pay_link && invoice.status !== "DRAFT" && (
                 <a className="pill pill-small pill-grey" href={invoice.pay_link} target="_blank" rel="noopener noreferrer">
                   Payment page
+                </a>
+              )}
+              {["SENT", "UNPAID", "PARTIALLY_PAID"].includes(invoice.status) && (
+                <a
+                  className="pill pill-small pill-grey"
+                  href={`/api/invoices/${invoice.invoice_id}/qr.png`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  QR code
                 </a>
               )}
             </div>

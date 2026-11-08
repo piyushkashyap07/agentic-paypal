@@ -31,4 +31,16 @@ class PaymentAgentState(TypedDict):
     requested_action: NotRequired[str]
 
     # Refunds move money back, so they need their own confirmation.
-    pending_refund_confirmation: NotRequired[bool]
+    pending_refund_confirmation: NotRequired[bool]
+
+    # Details the LLM pulled out for the requested action, e.g.
+    # {"dispute_id": ..., "tracking_number": ..., "amount": ...}.
+    action_args: NotRequired[dict]
+
+    # Cancelling an invoice and accepting a dispute (which refunds the
+    # buyer) need their own confirmation too.
+    pending_cancel_confirmation: NotRequired[bool]
+    pending_dispute_accept: NotRequired[str]
+
+    # Last pay link (PayPal order) made in this conversation.
+    order_id: NotRequired[str]

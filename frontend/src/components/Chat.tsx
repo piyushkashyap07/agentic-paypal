@@ -15,6 +15,9 @@ const SUGGESTIONS = [
   "Why haven't I been paid?",
   "Send a reminder",
   "Refund the payment",
+  "How much did I earn this month?",
+  "Any disputes?",
+  "Payment link for $50 for a consultation",
 ];
 
 const WELCOME: Message = {
@@ -25,17 +28,22 @@ const WELCOME: Message = {
     "I'll post here when something changes.",
 };
 
-// Show payment links as clickable links.
+// Show payment links as clickable links and QR codes as images.
 function linkify(text: string): ReactNode[] {
-  return text.split(/(https:\/\/\S+)/g).map((part, index) =>
-    part.startsWith("https://") ? (
+  return text.split(/(https:\/\/\S+|\/api\/\S+\.png)/g).map((part, index) => {
+    if (part.startsWith("/api/") && part.endsWith(".png")) {
+      // eslint-disable-next-line @next/next/no-img-element -- served by our backend, not a static asset
+      return <img key={index} className="chat-qr" src={part} alt="QR code to pay the invoice" width={160} height={160} />;
+    }
+
+    return part.startsWith("https://") ? (
       <a key={index} href={part} target="_blank" rel="noopener noreferrer">
         {part}
       </a>
     ) : (
       part
-    ),
-  );
+    );
+  });
 }
 
 export default function Chat({
