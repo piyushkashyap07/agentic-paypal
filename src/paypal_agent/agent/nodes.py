@@ -90,7 +90,33 @@ INVOICE_ACTIONS = {
     "check_status",
     "send_reminder",
     "refund",
+    "cancel_invoice",
+    "qr_code",
+    "refund_status",
+    "add_tracking",
+    "get_tracking",
 }
+
+# Actions about the whole PayPal account, not one invoice.
+ACCOUNT_ACTIONS = {
+    "earnings",
+    "list_disputes",
+    "explain_dispute",
+    "accept_dispute",
+    "create_payment_link",
+    "check_payment_link",
+}
+
+# Extracted fields passed on to the action nodes as action_args.
+ACTION_ARG_KEYS = (
+    "amount",
+    "currency",
+    "description",
+    "dispute_id",
+    "tracking_number",
+    "carrier",
+    "period_days",
+)
 
 
 CURRENCY_SYMBOLS = {"$": "USD", "€": "EUR", "£": "GBP"}
@@ -122,13 +148,21 @@ async def _understand_message(state: PaymentAgentState) -> dict:
 Return only a valid JSON object with these fields:
 {
   "intent": "create_invoice", "send_invoice", "check_status",
-            "send_reminder", "refund", "explain_unpaid" or "general",
+            "send_reminder", "refund", "explain_unpaid",
+            "cancel_invoice", "qr_code", "refund_status",
+            "add_tracking", "get_tracking", "earnings",
+            "list_disputes", "explain_dispute", "accept_dispute",
+            "create_payment_link", "check_payment_link" or "general",
   "customer_name": string or null,
   "customer_email": string or null,
   "amount": string or null,
   "currency": string or null,
   "description": string or null,
   "due_in_days": integer or null,
+  "dispute_id": string or null,
+  "tracking_number": string or null,
+  "carrier": string or null,
+  "period_days": integer or null,
   "response": string
 }
 
@@ -153,6 +187,24 @@ Rules:
 - If the user asks to refund or return the money, use "refund".
 - If the user asks why they have not been paid, why the customer has not
   paid, or what is going on with an unpaid invoice, use "explain_unpaid".
+- If the user asks to cancel or void the invoice, use "cancel_invoice".
+- If the user asks for a QR code, use "qr_code".
+- If the user asks whether a refund went through or its status,
+  use "refund_status".
+- If the user gives a shipment tracking number, use "add_tracking"
+  (tracking_number, carrier such as UPS, FEDEX, USPS, DHL).
+- If the user asks where a shipment is or for tracking info,
+  use "get_tracking".
+- If the user asks how much they earned, received or made, use "earnings".
+  period_days: "this week" -> 7, "this month" -> 30, "this year" -> 365.
+- If the user asks about disputes, claims or chargebacks in general,
+  use "list_disputes". About one dispute (or "explain the dispute"),
+  use "explain_dispute"; to accept or give in on one, use
+  "accept_dispute". Put an id like "PP-D-12345" in dispute_id.
+- If the user wants a payment link, checkout link or a quick way to get
+  paid without an invoice or customer email, use "create_payment_link"
+  (amount, currency, description). If they ask whether the link was paid,
+  or to collect that payment, use "check_payment_link".
 - due_in_days is how many days from today the invoice is due, e.g. "net 30"
   or "due in two weeks". Use null when the user did not say.
 - For unrelated requests, use intent "general".
@@ -211,6 +263,20 @@ Rules:
             "needs_clarification": False,
         }
 
+    action_args = {
+        key: extracted.get(key)
+        for key in ACTION_ARG_KEYS
+        if extracted.get(key) not in (None, "")
+    }
+
+    # Account-wide actions don't need an invoice in this conversation.
+    if extracted.get("intent") in ACCOUNT_ACTIONS:
+        return {
+            "requested_action": extracted["intent"],
+            "action_args": action_args,
+            "needs_clarification": False,
+        }
+
     # Follow-up actions work on the invoice created in this conversation.
     if extracted.get("intent") in INVOICE_ACTIONS:
         if not state.get("invoice_id"):
@@ -229,6 +295,7 @@ Rules:
 
         return {
             "requested_action": extracted["intent"],
+            "action_args": action_args,
             "needs_clarification": False,
         }
 

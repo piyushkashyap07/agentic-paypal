@@ -27,7 +27,8 @@ Last updated: 2026-11-04 (items 1–13 done or as noted; 14 skipped; on `dev`).
 | 11 | Hardening (error paths, raw PayPal bodies in logs, retries) | n/a | P2 | S–M | ✅ done |
 | 12 | Tests for new work + frontend | n/a | P2 | S | ✅ backend: 62 pass; frontend: vitest + Testing Library (`npm test` in `frontend/`), 17 tests covering `lib/api.ts`, `lib/money.ts`, `Chat` (history skipped, "Update:" messages, no duplicates, errors, links) and `InvoiceList` (badges, per-status actions). Still not checked by eye in a real browser. |
 | 13 | Cleanup stubs / leftovers | n/a | P3 | S | ✅ done |
-| 14 | Orders/pay links, subscriptions, earnings insights | §8 | P3 | L | ⏭ deliberately skipped (see D14) |
+| 14 | Orders/pay links, subscriptions, earnings insights | §8 | P3 | L | ✅ pay links + earnings done (D16); subscriptions still skipped |
+| 15 | Disputes, cancel invoice, QR code, refund status, shipment tracking | §8 | P2 | M | ✅ done over MCP (D16); tracking needs the app permission |
 
 ## What was verified, and how
 
@@ -77,6 +78,21 @@ The create/send/refund folders were not run through newman (they spend sandbox d
 ## Decision log
 
 Newest first. Format: decision → why → rejected alternatives → how to change it.
+
+### D16. Extra PayPal tools from PS §8, all through MCP
+- **What:** disputes (list / explain with advice / accept), earnings, cancel sent invoice, QR code, refund status,
+  pay links (orders), shipment tracking. Chat intents + `api/commerce_routes.py` + dashboard (Cancel / QR code buttons,
+  "Last 30 days" panel with earnings and disputes, QR image in chat).
+- **Safety:** accepting a dispute refunds the buyer → needs `CONFIRM ACCEPT`; cancelling emails the customer → needs
+  `CONFIRM CANCEL`. A pay link's money is collected (`pay_order`) only after PayPal reports the buyer APPROVED it.
+- **Dispute advice is fixed text per reason**, not LLM: a wrong suggestion about money is worse than a plain one.
+- **Sandbox findings:** `list_transactions` and shipment tracking return **403** for our app (missing "Transaction
+  Search" / tracking features in the developer dashboard). Earnings fall back to paid invoices; tracking shows a clear
+  "turn the feature on" message. `cancel_sent_invoice` refuses drafts (PayPal rule). `generate_invoice_qr_code` returns
+  multipart text; we extract the PNG. Refund ids are under `refunds.transactions[].recipient_transaction_id`.
+  `create_order` is USD-only in PayPal MCP and its reply has no amount.
+- **Not verified live:** accepting a real dispute (sandbox has none; needs a buyer to open one), collecting a paid
+  pay link (needs a buyer to approve), adding tracking (needs the permission).
 
 ### D15. PayPal calls go through the official PayPal MCP server
 - **Why:** the problem statement's architecture is "AI Agent → PayPal MCP/Agent Tools → PayPal". Using PayPal's

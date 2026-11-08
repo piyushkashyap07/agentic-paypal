@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import ActivityFeed from "@/components/ActivityFeed";
+import BusinessPanel from "@/components/BusinessPanel";
 import Chat from "@/components/Chat";
 import Header from "@/components/Header";
 import InvoiceList from "@/components/InvoiceList";
@@ -65,6 +66,7 @@ export default function Dashboard() {
             <Chat onAgentReply={loadInvoices} events={events} />
             <div className="side-col">
               <InvoiceList invoices={invoices} error={invoiceError} onChanged={loadInvoices} />
+              <BusinessPanel />
               <ActivityFeed events={events ?? []} />
             </div>
           </div>

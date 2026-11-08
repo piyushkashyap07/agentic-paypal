@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from paypal_agent.agent.graph import build_graph
+from paypal_agent.api.commerce_routes import router as commerce_router
 from paypal_agent.api.routes import router
 from paypal_agent.api.webhooks import router as webhook_router
 from paypal_agent.config import settings
@@ -54,6 +55,7 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(commerce_router)
 app.include_router(webhook_router)
 
 

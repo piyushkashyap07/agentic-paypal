@@ -633,6 +633,47 @@ button:disabled {
   margin-top: 2px;
 }
 
+/* Earnings + disputes */
+.business-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px 4px;
+}
+
+.business-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--navy-deep);
+  margin-top: 4px;
+}
+
+.business-disputes {
+  padding: 12px 20px 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.business-ok {
+  font-size: 14px;
+  color: var(--green);
+}
+
+.business-dispute {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.chat-qr {
+  display: block;
+  margin-top: 8px;
+  border-radius: 8px;
+  background: #fff;
+}
+
 .empty {
   padding: 24px 20px;
   color: var(--muted);

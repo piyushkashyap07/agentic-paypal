@@ -1,5 +1,7 @@
 from langgraph.graph import END, START, StateGraph
 
+from paypal_agent.agent import commerce_nodes
+
 from paypal_agent.agent.nodes import (
     check_status_node,
     confirmation_gate,
@@ -22,7 +24,21 @@ ACTION_NODES = {
     "send_reminder": "send_reminder_node",
     "refund": "request_refund_node",
     "explain_unpaid": "explain_unpaid_node",
+    "cancel_invoice": "request_cancel_node",
+    "qr_code": "qr_code_node",
+    "refund_status": "refund_status_node",
+    "add_tracking": "add_tracking_node",
+    "get_tracking": "get_tracking_node",
+    "earnings": "earnings_node",
+    "list_disputes": "list_disputes_node",
+    "explain_dispute": "explain_dispute_node",
+    "accept_dispute": "request_accept_dispute_node",
+    "create_payment_link": "create_payment_link_node",
+    "check_payment_link": "check_payment_link_node",
 }
+
+# Nodes that carry out a confirmed cancel / dispute acceptance.
+CONFIRMED_NODES = ["cancel_invoice_node", "accept_dispute_node"]
 
 # One-word shortcuts that skip the LLM once an invoice exists.
 KEYWORD_ACTIONS = {
@@ -31,10 +47,19 @@ KEYWORD_ACTIONS = {
     "remind": "send_reminder",
     "refund": "refund",
     "why": "explain_unpaid",
+    "qr": "qr_code",
 }
 
 
-BARE_CONFIRMATIONS = {"confirm", "confirm refund", "cancel", "no", "stop"}
+BARE_CONFIRMATIONS = {
+    "confirm",
+    "confirm refund",
+    "confirm cancel",
+    "confirm accept",
+    "cancel",
+    "no",
+    "stop",
+}
 
 
 def route_before_understanding(state: PaymentAgentState) -> str:
@@ -49,6 +74,14 @@ def route_before_understanding(state: PaymentAgentState) -> str:
     if state.get("pending_refund_confirmation"):
         if message in {"confirm refund", "cancel", "no", "stop"}:
             return "refund_node"
+
+    if state.get("pending_cancel_confirmation"):
+        if message in {"confirm cancel", "cancel", "no", "stop"}:
+            return "cancel_invoice_node"
+
+    if state.get("pending_dispute_accept"):
+        if message in {"confirm accept", "cancel", "no", "stop"}:
+            return "accept_dispute_node"
 
     # A bare confirmation with nothing pending must never restart a workflow.
     if message in BARE_CONFIRMATIONS:
@@ -95,6 +128,10 @@ def build_graph(checkpointer):
     graph.add_node("explain_unpaid_node", explain_unpaid_node)
     graph.add_node("nothing_pending_node", nothing_pending_node)
 
+    for node in [*ACTION_NODES.values(), *CONFIRMED_NODES]:
+        if node.endswith("_node") and hasattr(commerce_nodes, node):
+            graph.add_node(node, getattr(commerce_nodes, node))
+
     graph.add_conditional_edges(
         START,
         route_before_understanding,
@@ -104,6 +141,7 @@ def build_graph(checkpointer):
             "refund_node": "refund_node",
             "nothing_pending_node": "nothing_pending_node",
             **{node: node for node in ACTION_NODES.values()},
+            **{node: node for node in CONFIRMED_NODES},
         },
     )
 
@@ -127,7 +165,12 @@ def build_graph(checkpointer):
 
     graph.add_edge("create_invoice_draft", END)
 
-    for node in [*ACTION_NODES.values(), "refund_node", "nothing_pending_node"]:
+    for node in [
+        *ACTION_NODES.values(),
+        *CONFIRMED_NODES,
+        "refund_node",
+        "nothing_pending_node",
+    ]:
         graph.add_edge(node, END)
 
     return graph.compile(checkpointer=checkpointer)
