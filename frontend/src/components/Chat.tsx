@@ -2,6 +2,7 @@
 
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 
+import CollapseToggle from "@/components/CollapseToggle";
 import { AgentEvent, api } from "@/lib/api";
 
 type Message = {
@@ -170,14 +171,11 @@ export default function Chat({
       </div>
 
       <div className="examples">
-        <button
-          type="button"
-          className="examples-toggle"
-          aria-expanded={showExamples}
-          onClick={() => setShowExamples((open) => !open)}
-        >
-          {showExamples ? "▾ Hide examples" : "▸ Try an example"}
-        </button>
+        <CollapseToggle
+          open={showExamples}
+          onToggle={() => setShowExamples((open) => !open)}
+          label="example prompts"
+        />
         {showExamples && (
           <div className="suggestions">
             {SUGGESTIONS.map((suggestion) => (
