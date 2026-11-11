@@ -8,7 +8,7 @@ const sans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Agentic PayPal",
+  title: "Dueflow",
   description: "An AI agent that invoices your clients, watches for payment and follows up for you.",
 };
 
