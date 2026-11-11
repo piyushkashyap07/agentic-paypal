@@ -73,7 +73,8 @@ class FakeMCP:
                 "links": [{"rel": "payer-action", "href": "https://pay.example/ORDER1"}],
             },
             "get_order": {"id": "ORDER1", "status": "APPROVED", "links": []},
-            "pay_order": {"id": "ORDER1", "status": "COMPLETED", "links": []},
+            # Real pay_order replies aren't order-shaped; get_order is re-read.
+            "pay_order": {"unexpected": "shape"},
             "create_shipment_tracking": {},
         }
 
@@ -286,7 +287,14 @@ async def test_chat_earnings(chat):
 async def test_chat_payment_link_then_collect(chat, mcp):
     assert "https://pay.example/ORDER1" in await chat("payment link for $40 for a sketch")
 
-    assert "paid" in await chat("was it paid?")
+    def order_status_after(tool, arguments, real=mcp.call):
+        if tool == "pay_order":
+            mcp.results["get_order"] = {"id": "ORDER1", "status": "COMPLETED", "links": []}
+        return real(tool, arguments)
+
+    mcp.call = order_status_after
+
+    assert "🎉" in await chat("was it paid?")
     assert ("pay_order", {"id": "ORDER1"}) in mcp.calls
 
 

@@ -330,7 +330,11 @@ class PayPalCommerceService:
     async def capture_payment(self, order_id: str) -> dict:
         """Collect the money once the buyer has approved the order."""
 
-        return summarize_order(await self._call("pay_order", {"id": order_id}))
+        await self._call("pay_order", {"id": order_id})
+
+        # pay_order's reply isn't shaped like an order (no status/links we
+        # can rely on), so read the order again for its real status.
+        return await self.get_payment_link(order_id)
 
     # --- Shipment tracking ------------------------------------------------
 
