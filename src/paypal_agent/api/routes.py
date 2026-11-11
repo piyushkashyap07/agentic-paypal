@@ -185,6 +185,7 @@ async def list_invoices():
     try:
         items = await PayPalInvoiceService().list_invoices()
         simulated = await repositories.simulated_overdue_ids()
+        hidden = await repositories.hidden_invoice_ids()
 
         return [
             {
@@ -192,6 +193,7 @@ async def list_invoices():
                 "simulated_overdue": item.get("id") in simulated,
             }
             for item in items
+            if item.get("id") not in hidden
         ]
 
     except Exception as exc:

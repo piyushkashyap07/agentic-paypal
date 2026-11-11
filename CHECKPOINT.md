@@ -90,6 +90,16 @@ The create/send/refund folders were not run through newman (they spend sandbox d
 
 Newest first. Format: decision → why → rejected alternatives → how to change it.
 
+### D19. Delete, cancel & delete, reopen; in-app pop-ups (2026-11-11)
+- Browser `confirm()` pop-ups replaced by an in-app dialog (`components/Dialog.tsx`): ✕, Escape and clicking outside
+  all close it without doing anything.
+- Cancel asks: Keep it / Cancel invoice / Cancel & delete. Drafts get a red Delete. A red **Delete (n)** button by
+  "Invoices" opens the cancelled invoices: Reopen or Delete each, or Delete all.
+- **PayPal can't delete sent or cancelled invoices, or un-cancel them.** So: deleting a draft deletes it in PayPal
+  (REST `DELETE`, MCP has no tool for it); deleting a cancelled invoice hides it from our dashboard
+  (`hidden_invoices` table); Reopen creates a fresh draft copy and hides the cancelled one.
+- Fixed: a paid invoice that had been "simulated overdue" kept showing "Overdue".
+
 ### D18. Google Gemini as a second AI model (2026-11-11)
 - **Why:** Ollama Cloud's free credits ran out (HTTP 402) right before recording the demo.
 - **How:** `services/gemini_client.py` calls Gemini's OpenAI-compatible endpoint with plain `httpx` (no new
