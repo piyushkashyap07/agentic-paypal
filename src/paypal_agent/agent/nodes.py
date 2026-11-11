@@ -39,8 +39,13 @@ LLM_TIMEOUT_SECONDS = 60
 MAX_HISTORY_MESSAGES = 20
 
 
-def get_llm() -> AsyncClient:
-    """Create an authenticated Ollama Cloud client."""
+def get_llm():
+    """The configured model client (Ollama Cloud or Google Gemini)."""
+
+    if settings.llm_provider == "gemini":
+        from paypal_agent.services.gemini_client import GeminiClient
+
+        return GeminiClient(timeout=LLM_TIMEOUT_SECONDS)
 
     if not settings.ollama_api_key:
         raise RuntimeError(

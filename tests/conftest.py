@@ -13,6 +13,8 @@ def temp_database(tmp_path, monkeypatch):
     )
     # Tests never start the real PayPal MCP server; MCP tests fake mcp_client.
     monkeypatch.setattr(settings, "paypal_transport", "rest")
+    # Same for the model: tests fake it, whatever your own .env says.
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
     session._engine = session._factory = None
     session._ready = False
 
