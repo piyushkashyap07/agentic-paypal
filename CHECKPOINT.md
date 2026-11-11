@@ -90,6 +90,17 @@ The create/send/refund folders were not run through newman (they spend sandbox d
 
 Newest first. Format: decision → why → rejected alternatives → how to change it.
 
+### D18. Google Gemini as a second AI model (2026-11-11)
+- **Why:** Ollama Cloud's free credits ran out (HTTP 402) right before recording the demo.
+- **How:** `services/gemini_client.py` calls Gemini's OpenAI-compatible endpoint with plain `httpx` (no new
+  dependency) and returns the same shape as the Ollama client, so the agent code didn't change.
+  `LLM_PROVIDER=gemini` + `GEMINI_API_KEY` switches; default stays `ollama`.
+- **Model:** `gemini-flash-lite-latest` with `reasoning_effort: low`. `gemini-2.5-flash` is closed to new keys
+  (404), and `gemini-flash-latest` thinks so long it hit our 60 s timeout. Lite answers in ~1.5 s and handled the
+  whole demo flow correctly (extraction, "why unpaid", earnings, disputes, pay link).
+- **Busy errors:** Google's free tier sometimes returns 503 "high demand" / 429. The client retries twice (1 s, 3 s);
+  asking the model again has no side effects. After that the chat shows the clear "model unavailable" message.
+
 ### D17. Security and robustness pass (2026-11-11)
 Found by reviewing the code and trying the attacks for real; each fix has a test in `tests/test_security.py`.
 

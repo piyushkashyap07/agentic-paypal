@@ -128,3 +128,82 @@ def test_model_out_of_credits_gives_a_clear_message(client, monkeypatch):
 
     assert response.status_code == 503
     assert "Shortcuts still work" in response.json()["detail"]
+
+
+# --- Gemini ------------------------------------------------------------------
+
+
+def _mock_gemini(monkeypatch, responses):
+    import httpx
+
+    from paypal_agent.services import gemini_client
+
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+    monkeypatch.setattr(gemini_client, "RETRY_DELAYS", (0, 0))
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        return responses.pop(0)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        gemini_client.httpx, "AsyncClient",
+        lambda timeout: real(transport=httpx.MockTransport(handler)),
+    )
+
+    return gemini_client, sent
+
+
+def test_gemini_client_is_used_when_configured(monkeypatch):
+    from paypal_agent.services.gemini_client import GeminiClient
+
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+
+    assert isinstance(nodes.get_llm(), GeminiClient)
+
+
+def test_gemini_reply_has_the_ollama_shape(monkeypatch):
+    import httpx
+
+    gemini_client, sent = _mock_gemini(monkeypatch, [
+        httpx.Response(200, json={"choices": [{"message": {"content": '{"intent": "general"}'}}]}),
+    ])
+
+    result = asyncio.run(gemini_client.GeminiClient(timeout=5).chat(
+        model="ignored", messages=[{"role": "user", "content": "hi"}], format="json"
+    ))
+
+    assert json.loads(result.message.content) == {"intent": "general"}
+    body = json.loads(sent[0].content)
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["model"] == settings.gemini_model
+    assert sent[0].headers["authorization"] == "Bearer test-key"
+
+
+def test_gemini_retries_when_busy(monkeypatch):
+    import httpx
+
+    gemini_client, sent = _mock_gemini(monkeypatch, [
+        httpx.Response(503, json={"error": {"message": "high demand"}}),
+        httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]}),
+    ])
+
+    asyncio.run(gemini_client.GeminiClient(timeout=5).chat(messages=[]))
+
+    assert len(sent) == 2
+
+
+def test_gemini_gives_up_with_a_clear_error(monkeypatch):
+    import httpx
+
+    gemini_client, sent = _mock_gemini(monkeypatch, [
+        httpx.Response(429, json={"error": {"message": "Quota exceeded"}}) for _ in range(3)
+    ])
+
+    with pytest.raises(gemini_client.GeminiError) as error:
+        asyncio.run(gemini_client.GeminiClient(timeout=5).chat(messages=[]))
+
+    assert error.value.status_code == 429
+    assert len(sent) == 3

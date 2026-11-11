@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     ollama_api_key: str = ""
     ollama_model: str = "gpt-oss:120b"
     ollama_base_url: str = "https://ollama.com"
+
+    # Which AI model the agent uses: "ollama" (Ollama Cloud) or "gemini"
+    # (Google Gemini, free tier key from aistudio.google.com).
+    llm_provider: str = "ollama"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-lite-latest"
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
