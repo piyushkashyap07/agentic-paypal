@@ -410,7 +410,9 @@ async def check_payment_link_node(state: PaymentAgentState) -> dict:
     if order["status"] == "COMPLETED":
         return action_result(state, "🎉 The payment link was paid and the money is in your PayPal account.")
 
-    return action_result(
-        state,
-        "The customer hasn't paid the link yet. Link:\n" + str(order["pay_link"]),
-    )
+    text = "The customer hasn't paid the link yet."
+
+    if order["pay_link"]:
+        text += "\nLink: " + order["pay_link"]
+
+    return action_result(state, text)
