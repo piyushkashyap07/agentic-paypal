@@ -52,23 +52,20 @@ export default function Dashboard() {
     <>
       <Header />
       <main className="dash">
-        <div className="container">
-          <div className="dash-title">
-            <div>
-              <h1>Your payments</h1>
-              <p>Live from your PayPal Sandbox account.</p>
+        {/* Chat on the left stays put at full height; the right column scrolls on its own. */}
+        <div className="container dash-grid">
+          <Chat onAgentReply={loadInvoices} events={events} />
+          <div className="side-col">
+            <div className="dash-title">
+              <div>
+                <h1>Your payments</h1>
+                <p>Live from your PayPal Sandbox account.</p>
+              </div>
             </div>
-          </div>
-
-          <Stats invoices={invoices ?? []} />
-
-          <div className="dash-grid">
-            <Chat onAgentReply={loadInvoices} events={events} />
-            <div className="side-col">
-              <InvoiceList invoices={invoices} error={invoiceError} onChanged={loadInvoices} />
-              <BusinessPanel />
-              <ActivityFeed events={events ?? []} />
-            </div>
+            <Stats invoices={invoices ?? []} />
+            <InvoiceList invoices={invoices} error={invoiceError} onChanged={loadInvoices} />
+            <BusinessPanel />
+            <ActivityFeed events={events ?? []} />
           </div>
         </div>
       </main>
