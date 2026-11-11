@@ -62,3 +62,59 @@ describe("InvoiceList", () => {
     expect(action).toHaveBeenCalledWith("INV2-1", "send");
   });
 });
+
+describe("InvoiceList pop-ups and bin", () => {
+  it("asks in an in-app pop-up before cancelling, with cancel / cancel & delete / keep", async () => {
+    const action = vi.spyOn(api, "invoiceAction").mockResolvedValue({});
+    render(<InvoiceList invoices={[invoice({})]} error={null} onChanged={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Cancel this invoice?" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep it" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel invoice" })).toBeInTheDocument();
+    expect(action).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel & delete" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith("INV2-1", "cancel-delete"));
+  });
+
+  it("closes the pop-up on Escape or ✕ without doing anything", () => {
+    const action = vi.spyOn(api, "invoiceAction").mockResolvedValue({});
+    render(<InvoiceList invoices={[invoice({ status: "PAID" })]} error={null} onChanged={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refund" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refund" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("keeps cancelled invoices in the Delete bin, with reopen and delete all", async () => {
+    const deleteAll = vi.spyOn(api, "deleteCancelled").mockResolvedValue({ count: 1 });
+    const action = vi.spyOn(api, "invoiceAction").mockResolvedValue({ invoice_id: "INV2-NEW" });
+    const invoices = [invoice({ invoice_id: "LIVE" }), invoice({ invoice_id: "GONE", status: "CANCELLED" })];
+    render(<InvoiceList invoices={invoices} error={null} onChanged={() => {}} />);
+
+    expect(screen.queryByText("GONE")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete (1)" }));
+    expect(screen.getByText("GONE")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith("GONE", "reopen"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete all" }));
+    await waitFor(() => expect(deleteAll).toHaveBeenCalled());
+  });
+
+  it("never badges a paid invoice as Overdue", () => {
+    render(<InvoiceList invoices={[invoice({ status: "PAID", simulated_overdue: true })]} error={null} onChanged={() => {}} />);
+    expect(screen.getByText("Paid")).toBeInTheDocument();
+    expect(screen.queryByText("Overdue")).not.toBeInTheDocument();
+  });
+});

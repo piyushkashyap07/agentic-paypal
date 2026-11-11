@@ -466,6 +466,14 @@ class PayPalInvoiceService:
 
         return result.get("verification_status") == "SUCCESS"
 
+    async def delete_draft_invoice(self, invoice_id: str) -> None:
+        """Delete a draft in PayPal. (Only drafts can be deleted there.)
+
+        PayPal MCP has no delete tool, so this always uses the REST API.
+        """
+
+        await self._invoice_request("DELETE", f"/{invoice_id}")
+
     async def send_invoice(self, invoice_id: str) -> dict:
         """Email a draft invoice to the customer."""
 

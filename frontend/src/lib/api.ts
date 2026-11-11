@@ -26,7 +26,15 @@ export type ChatReply = {
   status: string;
 };
 
-export type InvoiceAction = "send" | "remind" | "refund" | "cancel" | "simulate-overdue";
+export type InvoiceAction =
+  | "send"
+  | "remind"
+  | "refund"
+  | "cancel"
+  | "cancel-delete"
+  | "delete"
+  | "reopen"
+  | "simulate-overdue";
 
 export type Earnings = {
   days: number;
@@ -84,7 +92,11 @@ export const api = {
       // Demo-only endpoint lives outside /invoices (see CHECKPOINT.md #3).
       action === "simulate-overdue"
         ? `/api/demo/invoices/${invoiceId}/simulate-overdue`
-        : `/api/invoices/${invoiceId}/${action}`,
+        : action === "cancel-delete"
+          ? `/api/invoices/${invoiceId}/cancel?delete=true`
+          : `/api/invoices/${invoiceId}/${action}`,
       action === "refund" ? {} : undefined,
     ),
+
+  deleteCancelled: () => request<{ count: number }>("POST", "/api/invoices/delete-cancelled"),
 };

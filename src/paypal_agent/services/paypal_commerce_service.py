@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from paypal_agent.config import settings
@@ -119,6 +119,34 @@ class PayPalCommerceService:
                 "send_to_recipient": True,
                 "note": "This invoice has been cancelled. No payment is needed.",
             },
+        )
+
+    async def reopen_invoice(self, invoice_id: str) -> dict:
+        """Make a fresh draft copy of a cancelled invoice.
+
+        PayPal can't un-cancel an invoice, so reopening means: same
+        customer, amount and work, as a new draft ready to send.
+        """
+
+        old = await self.invoices.get_invoice(invoice_id)
+
+        if old.get("status") != "CANCELLED":
+            raise ValueError("Only cancelled invoices can be reopened.")
+
+        billing = (old.get("primary_recipients") or [{}])[0].get("billing_info", {})
+        item = (old.get("items") or [{}])[0]
+        unit = item.get("unit_amount", {})
+
+        if not billing.get("email_address") or not unit.get("value"):
+            raise ValueError("This invoice is missing details needed to reopen it.")
+
+        return await self.invoices.create_draft_invoice(
+            customer_email=billing["email_address"],
+            customer_name=billing.get("name", {}).get("given_name") or "Customer",
+            amount=_money(unit["value"]),
+            currency=unit.get("currency_code") or old["detail"]["currency_code"],
+            description=item.get("name") or "Services",
+            due_date=date.today() + timedelta(days=settings.default_due_days),
         )
 
     async def invoice_qr_code(self, invoice_id: str) -> str:

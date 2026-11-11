@@ -47,6 +47,19 @@ class InvoiceRecord(Base):
     )
 
 
+class HiddenInvoiceRecord(Base):
+    """An invoice the user deleted from the dashboard.
+
+    PayPal can't delete a sent or cancelled invoice, so "delete" for those
+    means: stop showing it here. (Drafts are deleted in PayPal as well.)
+    """
+
+    __tablename__ = "hidden_invoices"
+
+    invoice_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    hidden_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class CustomerRecord(Base):
     """Name -> email memory so "invoice Acme" works without retyping the email."""
 

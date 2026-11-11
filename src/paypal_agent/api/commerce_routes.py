@@ -1,4 +1,5 @@
 import base64
+from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Response
 
@@ -8,6 +9,7 @@ from paypal_agent.api.schemas import (
     PaymentLinkRequest,
     TrackingRequest,
 )
+from paypal_agent.config import settings
 from paypal_agent.database import repositories
 from paypal_agent.services.paypal_commerce_service import (
     PayPalCommerceService,
@@ -42,12 +44,74 @@ async def run(what: str, call):
 
 
 @router.post("/invoices/{invoice_id}/cancel", tags=["Invoices"])
-async def cancel_invoice(invoice_id: InvoiceId):
+async def cancel_invoice(invoice_id: InvoiceId, delete: bool = False):
+    """Cancel a sent invoice; with delete=true also remove it from the dashboard."""
+
     await run("cancel the invoice", lambda s: s.cancel_invoice(invoice_id))
     await repositories.upsert_invoice(invoice_id, status="CANCELLED")
     await repositories.add_event(invoice_id, f"Invoice {invoice_id} was cancelled.")
 
-    return {"status": "cancelled", "invoice_id": invoice_id}
+    if delete:
+        await repositories.hide_invoices([invoice_id])
+
+    return {"status": "cancelled", "invoice_id": invoice_id, "deleted": delete}
+
+
+@router.post("/invoices/delete-cancelled", tags=["Invoices"])
+async def delete_cancelled_invoices():
+    """Remove every cancelled invoice from the dashboard."""
+
+    items = await run("list the invoices", lambda s: s.invoices.list_invoices(page_size=100))
+    cancelled = [item["id"] for item in items if item.get("status") == "CANCELLED"]
+    await repositories.hide_invoices(cancelled)
+
+    return {"status": "deleted", "count": len(cancelled)}
+
+
+@router.post("/invoices/{invoice_id}/delete", tags=["Invoices"])
+async def delete_invoice(invoice_id: InvoiceId):
+    """Delete a draft (in PayPal too) or remove a cancelled invoice from the dashboard."""
+
+    invoice = await run("find the invoice", lambda s: s.invoices.get_invoice(invoice_id))
+    status = invoice.get("status")
+
+    if status == "DRAFT":
+        await run("delete the draft", lambda s: s.invoices.delete_draft_invoice(invoice_id))
+    elif status != "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Only drafts and cancelled invoices can be deleted. Cancel it first.",
+        )
+
+    await repositories.hide_invoices([invoice_id])
+
+    return {"status": "deleted", "invoice_id": invoice_id}
+
+
+@router.post("/invoices/{invoice_id}/reopen", tags=["Invoices"])
+async def reopen_invoice(invoice_id: InvoiceId):
+    """Replace a cancelled invoice with a fresh draft copy."""
+
+    new = await run("reopen the invoice", lambda s: s.reopen_invoice(invoice_id))
+    new_id = new.get("id")
+    billing = (new.get("primary_recipients") or [{}])[0].get("billing_info", {})
+
+    # PayPal MCP can't store a due date, so the monitor reads ours.
+    await repositories.upsert_invoice(
+        new_id,
+        status=new.get("status", "DRAFT"),
+        customer_name=billing.get("name", {}).get("given_name"),
+        customer_email=billing.get("email_address"),
+        amount=new.get("amount", {}).get("value"),
+        currency=new.get("detail", {}).get("currency_code"),
+        due_date=date.today() + timedelta(days=settings.default_due_days),
+    )
+    await repositories.hide_invoices([invoice_id])
+    await repositories.add_event(
+        new_id or invoice_id, f"Invoice {invoice_id} reopened as new draft {new_id}."
+    )
+
+    return {"status": "reopened", "invoice_id": new_id, "replaces": invoice_id}
 
 
 @router.get("/invoices/{invoice_id}/qr.png", tags=["Invoices"])

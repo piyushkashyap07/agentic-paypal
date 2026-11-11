@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from paypal_agent.database.models import (
     CustomerRecord,
     EventRecord,
+    HiddenInvoiceRecord,
     InvoiceRecord,
 )
 from paypal_agent.database.session import get_factory, init_db
@@ -13,6 +14,21 @@ from paypal_agent.database.session import get_factory, init_db
 async def _session():
     await init_db()
     return get_factory()()
+
+
+# --- deleted (hidden) invoices -----------------------------------------------
+
+async def hide_invoices(invoice_ids: list[str]) -> None:
+    async with await _session() as session:
+        for invoice_id in invoice_ids:
+            await session.merge(HiddenInvoiceRecord(invoice_id=invoice_id))
+        await session.commit()
+
+
+async def hidden_invoice_ids() -> set[str]:
+    async with await _session() as session:
+        rows = await session.execute(select(HiddenInvoiceRecord.invoice_id))
+        return set(rows.scalars())
 
 
 # --- events -----------------------------------------------------------------

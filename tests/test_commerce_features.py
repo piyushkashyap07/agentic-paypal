@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -321,3 +322,75 @@ def test_commerce_nodes_exist_for_every_action():
         assert hasattr(nodes, node) or hasattr(commerce_nodes, node), node
 
     assert paypal_commerce_service.PAID_STATUSES
+
+
+# --- Delete / reopen ---------------------------------------------------------
+
+
+CANCELLED_INVOICE = {
+    "id": "INV2-OLD",
+    "status": "CANCELLED",
+    "detail": {"currency_code": "USD"},
+    "primary_recipients": [
+        {"billing_info": {"email_address": "buyer@example.com", "name": {"given_name": "Acme"}}}
+    ],
+    "items": [{"name": "Website work", "unit_amount": {"currency_code": "USD", "value": "300.00"}}],
+}
+
+
+def test_delete_cancel_and_reopen(mcp, monkeypatch):
+    from paypal_agent.database import repositories
+    from paypal_agent.services import paypal_invoice_service
+
+    monkeypatch.setattr(settings, "monitor_enabled", False)
+    monkeypatch.setattr(settings, "paypal_invoicer_email", "seller@example.com")
+    deleted_drafts = []
+
+    async def fake_delete(self, invoice_id):
+        deleted_drafts.append(invoice_id)
+
+    monkeypatch.setattr(paypal_invoice_service.PayPalInvoiceService, "delete_draft_invoice", fake_delete)
+
+    statuses = {"INV2-DRAFT": "DRAFT", "INV2-OLD": "CANCELLED", "INV2-X": "SENT"}
+
+    async def call(tool, arguments, real=mcp.call):
+        if tool == "get_invoice" and arguments["invoice_id"] in statuses:
+            if arguments["invoice_id"] == "INV2-OLD":
+                return json.loads(json.dumps(CANCELLED_INVOICE))
+            return {"id": arguments["invoice_id"], "status": statuses[arguments["invoice_id"]], "detail": {}}
+        if tool == "get_invoice" and arguments["invoice_id"] == "INV2-NEW":
+            return {"id": "INV2-NEW", "status": "DRAFT", "amount": {"value": "300.00"}, "detail": {"currency_code": "USD"},
+                    "primary_recipients": CANCELLED_INVOICE["primary_recipients"]}
+        if tool == "create_invoice":
+            mcp.calls.append((tool, arguments))
+            return {"href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-NEW"}
+        if tool == "list_invoices":
+            return {"items": [{"id": i, "status": s} for i, s in statuses.items()]}
+        return await real(tool, arguments)
+
+    mcp.call = call
+
+    with TestClient(app) as client:
+        # A sent invoice can't be deleted before it's cancelled.
+        assert client.post("/api/invoices/INV2-X/delete").status_code == 400
+
+        # A draft is deleted in PayPal too.
+        assert client.post("/api/invoices/INV2-DRAFT/delete").status_code == 200
+        assert deleted_drafts == ["INV2-DRAFT"]
+
+        # Cancel & delete hides it from the dashboard.
+        assert client.post("/api/invoices/INV2-X/cancel?delete=true").json()["deleted"] is True
+
+        # Reopen makes a fresh draft copy and hides the cancelled one.
+        reopened = client.post("/api/invoices/INV2-OLD/reopen").json()
+        assert reopened["invoice_id"] == "INV2-NEW"
+        created = next(args for tool, args in mcp.calls if tool == "create_invoice")
+        assert created["items"][0]["unit_amount"]["value"] == "300.00"
+        assert created["primary_recipients"][0]["billing_info"]["email_address"] == "buyer@example.com"
+
+        # Delete all cancelled.
+        assert client.post("/api/invoices/delete-cancelled").json()["count"] == 1
+
+    hidden = asyncio.run(repositories.hidden_invoice_ids())
+    assert {"INV2-DRAFT", "INV2-X", "INV2-OLD"} <= hidden
+    assert asyncio.run(repositories.get_invoice_record("INV2-NEW")).due_date is not None
