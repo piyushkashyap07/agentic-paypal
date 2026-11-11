@@ -158,6 +158,9 @@ async def test_payment_link_is_usd_only_and_returns_link(mcp):
 
     order = await PayPalCommerceService().create_payment_link("40", "usd", "Logo sketch")
 
+    create_args = mcp.calls[-1][1]
+    assert create_args["returnUrl"].endswith("/dashboard")
+
     assert order == {
         "order_id": "ORDER1",
         "status": "PAYER_ACTION_REQUIRED",

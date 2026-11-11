@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     paypal_transport: str = "mcp"
     paypal_mcp_package: str = "@paypal/mcp@1.8.1"
 
+    # Our Next.js app; PayPal sends buyers back here after a pay link.
+    frontend_url: str = "http://localhost:3000"
+
     # Browser origins allowed to make changes (our Next.js frontend).
     # Comma-separated. Anything else is refused (see api/security.py).
     allowed_origins: str = (
