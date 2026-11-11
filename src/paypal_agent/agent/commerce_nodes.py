@@ -1,4 +1,7 @@
+import re
+
 from paypal_agent.agent.nodes import action_result, normalize_reply
+from paypal_agent.api.security import ID_PATTERN
 from paypal_agent.agent.state import PaymentAgentState
 from paypal_agent.database import repositories
 from paypal_agent.services.paypal_commerce_service import (
@@ -47,6 +50,14 @@ def friendly(exc: Exception, fallback: str) -> str:
 
 def args(state: PaymentAgentState) -> dict:
     return state.get("action_args") or {}
+
+
+def valid_id(value) -> str | None:
+    """An id the LLM extracted, if it looks like a real PayPal id."""
+
+    value = str(value or "").strip()
+
+    return value if re.fullmatch(ID_PATTERN, value) else None
 
 
 # --- Invoice actions -------------------------------------------------------
@@ -191,7 +202,10 @@ async def get_tracking_node(state: PaymentAgentState) -> dict:
 async def earnings_node(state: PaymentAgentState) -> dict:
     """How much money came in over a period."""
 
-    days = args(state).get("period_days") or 30
+    try:
+        days = int(args(state).get("period_days") or 30)
+    except (TypeError, ValueError):
+        days = 30
 
     try:
         result = await PayPalCommerceService().earnings(days)
@@ -242,8 +256,10 @@ async def list_disputes_node(state: PaymentAgentState) -> dict:
 async def _pick_dispute(state: PaymentAgentState, service) -> str | None:
     """The dispute the user named, else the first one needing action."""
 
-    if args(state).get("dispute_id"):
-        return args(state)["dispute_id"]
+    named = valid_id(args(state).get("dispute_id"))
+
+    if named:
+        return named
 
     disputes = await service.list_disputes()
     waiting = [d for d in disputes if d["needs_action"]] or disputes

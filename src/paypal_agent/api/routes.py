@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request
+from paypal_agent.api.security import InvoiceId
 from paypal_agent.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -48,6 +49,18 @@ async def chat(
         print(
             f"Agent request failed: {type(exc).__name__}: {exc}"
         )
+
+        # Out of model credits / rate limited / model down: say so plainly,
+        # and point to the shortcuts that work without the AI.
+        if getattr(exc, "status_code", None) in {402, 429, 502, 503}:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "The AI model is unavailable right now (usage limit or "
+                    "outage). Shortcuts still work: SEND, STATUS, REMIND, "
+                    "REFUND, WHY, QR."
+                ),
+            ) from exc
 
         raise HTTPException(
             status_code=500,
@@ -114,7 +127,7 @@ async def create_invoice_draft(
 
 
 @router.post("/invoices/{invoice_id}/send", tags=["Invoices"])
-async def send_invoice(invoice_id: str):
+async def send_invoice(invoice_id: InvoiceId):
     try:
         await PayPalInvoiceService().send_invoice(invoice_id)
         return await check_invoice(invoice_id)
@@ -132,7 +145,7 @@ async def send_invoice(invoice_id: str):
 
 
 @router.get("/invoices/{invoice_id}", tags=["Invoices"])
-async def get_invoice_status(invoice_id: str):
+async def get_invoice_status(invoice_id: InvoiceId):
     try:
         return await check_invoice(invoice_id)
 
@@ -146,7 +159,7 @@ async def get_invoice_status(invoice_id: str):
 
 
 @router.post("/invoices/{invoice_id}/remind", tags=["Invoices"])
-async def send_invoice_reminder(invoice_id: str):
+async def send_invoice_reminder(invoice_id: InvoiceId):
     try:
         await PayPalInvoiceService().send_reminder(invoice_id)
 
@@ -191,7 +204,7 @@ async def list_invoices():
 
 
 @router.post("/invoices/{invoice_id}/refund", tags=["Invoices"])
-async def refund_invoice(invoice_id: str, refund: RefundRequest):
+async def refund_invoice(invoice_id: InvoiceId, refund: RefundRequest):
     try:
         result = await PayPalInvoiceService().refund_invoice(
             invoice_id,
@@ -245,7 +258,7 @@ async def run_monitor_now():
 
 
 @router.post("/demo/invoices/{invoice_id}/simulate-overdue", tags=["Demo"])
-async def simulate_overdue(invoice_id: str):
+async def simulate_overdue(invoice_id: InvoiceId):
     """Demo only: treat this invoice as overdue and let the monitor react.
 
     We cannot wait days in a live demo. The monitor then does exactly what

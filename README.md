@@ -34,6 +34,7 @@ Frontend tests: `cd frontend && npm test` (vitest, no backend needed).
 |---|---|---|
 | `APP_ENV` | `development` | Demo endpoints and the "Simulate overdue" button only work in `development` |
 | `PAYPAL_TRANSPORT` | `mcp` | `mcp` = PayPal calls go through the PayPal MCP server; `rest` = direct REST API (fallback) |
+| `ALLOWED_ORIGINS` | `http://localhost:3000,…:3001` | Browser origins allowed to make changes; other websites get 403 |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./paypal_agent.db` | Events, invoice state, remembered customers |
 | `MONITOR_ENABLED` / `MONITOR_INTERVAL_SECONDS` | `true` / `60` | Background polling of invoices |
 | `MONITOR_AUTO_REMIND` | `true` | Auto-remind overdue invoices (max once a day each) |

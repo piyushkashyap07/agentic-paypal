@@ -28,6 +28,21 @@ class Settings(BaseSettings):
     paypal_transport: str = "mcp"
     paypal_mcp_package: str = "@paypal/mcp@1.8.1"
 
+    # Browser origins allowed to make changes (our Next.js frontend).
+    # Comma-separated. Anything else is refused (see api/security.py).
+    allowed_origins: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:3001,http://127.0.0.1:3001"
+    )
+
+    @property
+    def allowed_origin_list(self) -> set[str]:
+        return {
+            origin.strip().rstrip("/")
+            for origin in self.allowed_origins.split(",")
+            if origin.strip()
+        }
+
     database_url: str = "sqlite+aiosqlite:///./paypal_agent.db"
 
     # Background payment monitor.

@@ -10,6 +10,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from paypal_agent.agent.graph import build_graph
 from paypal_agent.api.commerce_routes import router as commerce_router
 from paypal_agent.api.routes import router
+from paypal_agent.api.security import block_cross_site_requests
 from paypal_agent.api.webhooks import router as webhook_router
 from paypal_agent.config import settings
 from paypal_agent.database.session import close_db, init_db
@@ -53,6 +54,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.middleware("http")(block_cross_site_requests)
 
 app.include_router(router)
 app.include_router(commerce_router)

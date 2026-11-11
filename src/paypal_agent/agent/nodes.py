@@ -34,6 +34,11 @@ def save_conversation_turn(
     return history
 
 
+# Seconds to wait for the model, and how many past messages it sees.
+LLM_TIMEOUT_SECONDS = 60
+MAX_HISTORY_MESSAGES = 20
+
+
 def get_llm() -> AsyncClient:
     """Create an authenticated Ollama Cloud client."""
 
@@ -44,6 +49,8 @@ def get_llm() -> AsyncClient:
 
     return AsyncClient(
         host=settings.ollama_base_url,
+        # Never let a stalled model hang the chat forever.
+        timeout=LLM_TIMEOUT_SECONDS,
         headers={
             "Authorization": f"Bearer {settings.ollama_api_key}",
         },
@@ -219,7 +226,9 @@ Rules:
         }
     ]
 
-    for item in history:
+    # Only recent turns: long chats would otherwise grow every request
+    # until the model gets slow or rejects it.
+    for item in history[-MAX_HISTORY_MESSAGES:]:
         messages.append(
             {
                 "role": item["role"],
@@ -242,6 +251,10 @@ Rules:
 
     try:
         extracted = json.loads(result.message.content or "{}")
+
+        # Valid JSON can still be a list or a string; we need an object.
+        if not isinstance(extracted, dict):
+            raise TypeError("expected a JSON object")
     except (json.JSONDecodeError, TypeError):
         response = (
             "I couldn't reliably understand that request. "
