@@ -57,7 +57,7 @@ export default function Chat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   // Id of the newest monitor event already handled. null until the first load.
   const lastEventId = useRef<number | null>(null);
 
@@ -90,8 +90,13 @@ export default function Chat({
     onAgentReply();
   }, [events, onAgentReply]);
 
+  // Scroll only the message list, never the whole page.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = messagesRef.current;
+
+    if (list) {
+      list.scrollTop = list.scrollHeight;
+    }
   }, [messages, busy]);
 
   async function send(text: string) {
@@ -145,7 +150,7 @@ export default function Chat({
         </button>
       </div>
 
-      <div className="messages" aria-live="polite">
+      <div className="messages" aria-live="polite" ref={messagesRef}>
         {messages.map((message, index) => (
           <div key={index} className={`msg ${message.role === "user" ? "user" : "agent"} ${message.role === "error" ? "error" : ""}`}>
             {linkify(message.text)}
@@ -160,7 +165,6 @@ export default function Chat({
             </div>
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       <div className="suggestions">
