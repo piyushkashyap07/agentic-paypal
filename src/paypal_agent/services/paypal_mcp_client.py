@@ -14,6 +14,21 @@ TOKEN_LIFETIME_SECONDS = 8 * 60 * 60
 CALL_TIMEOUT_SECONDS = 60
 
 
+# Environment the MCP server process may see. It's a downloaded npm
+# package, so it gets what npx needs to run, not our secrets
+# (client secret, Ollama key): only the short-lived access token.
+CHILD_ENV_KEYS = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM"}
+CHILD_ENV_PREFIXES = ("NODE_", "NPM_", "npm_", "NVM_", "XDG_", "LC_")
+
+
+def _child_environment() -> dict:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in CHILD_ENV_KEYS or key.startswith(CHILD_ENV_PREFIXES)
+    }
+
+
 class PayPalMCPError(RuntimeError):
     """A PayPal MCP tool call failed."""
 
@@ -117,7 +132,7 @@ class PayPalMCPClient:
             command="npx",
             args=["-y", settings.paypal_mcp_package, "--tools=all"],
             env={
-                **os.environ,
+                **_child_environment(),
                 "PAYPAL_ACCESS_TOKEN": token,
                 "PAYPAL_ENVIRONMENT": environment,
             },

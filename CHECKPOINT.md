@@ -90,6 +90,25 @@ The create/send/refund folders were not run through newman (they spend sandbox d
 
 Newest first. Format: decision → why → rejected alternatives → how to change it.
 
+### D17. Security and robustness pass (2026-11-11)
+Found by reviewing the code and trying the attacks for real; each fix has a test in `tests/test_security.py`.
+
+| Problem (verified) | Fix |
+|---|---|
+| Any website the user visits could POST to our API (refund, cancel, remind…): a "no-cors" request from `evil.example` got **200** | `api/security.py` middleware: state-changing `/api/*` calls with a foreign `Origin` get **403**. Our frontend (`ALLOWED_ORIGINS`) and non-browser tools (no Origin) still work. Webhooks are excluded (signature-checked). |
+| `next dev` listened on the Wi-Fi address (`192.168.x.x:3000`): anyone at the venue could open the dashboard | `npm run dev` / `start` now bind to `127.0.0.1`. For a phone demo on purpose: `npx next dev --hostname 0.0.0.0`. |
+| Model returning a JSON list crashed the chat (`AttributeError`) | Non-object JSON is treated as "couldn't understand, rephrase". |
+| No timeout on the model call; a stall hung the chat | 60 s timeout on the Ollama client. |
+| Whole chat history sent every time; long chats get slow and fail | Only the last 20 messages go to the model. |
+| The PayPal MCP server (an npm package) got all our env vars, incl. client secret and Ollama key | It now gets only what npx needs plus the short-lived access token. |
+| Ids from URLs / the model went straight into PayPal calls | Path params must match `^[A-Za-z0-9_-]{1,64}$` (422 otherwise); model-supplied dispute ids are checked too. |
+| Model out of credits (Ollama 402) showed "Something went wrong" | 503 with a clear message and the shortcuts that still work. |
+
+Also checked, no issue: no secrets or DB files in git history; `npm audit` and `pip-audit` report 0 known
+vulnerabilities; money moves only after deterministic CONFIRM words (prompt injection can't skip them); webhook
+signatures are verified; PayPal error bodies aren't logged.
+**Not done (fine for a local demo):** no login/API key and no rate limiting. Add both before any public deployment.
+
 ### D16. Extra PayPal tools from PS §8, all through MCP
 - **What:** disputes (list / explain with advice / accept), earnings, cancel sent invoice, QR code, refund status,
   pay links (orders), shipment tracking. Chat intents + `api/commerce_routes.py` + dashboard (Cancel / QR code buttons,
