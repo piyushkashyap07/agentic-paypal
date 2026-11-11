@@ -1,4 +1,4 @@
-# Agentic PayPal: frontend
+# Dueflow: frontend
 
 Next.js app for the PayPal payment agent. It talks to the FastAPI backend in the repo root.
 

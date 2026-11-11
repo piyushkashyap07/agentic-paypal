@@ -16,7 +16,7 @@ export default function Header() {
       <div className="container header-inner">
         <Link href="/" className="brand">
           <BrandMark />
-          Agentic PayPal
+          Dueflow
         </Link>
 
         <nav className="nav" aria-label="Main">
