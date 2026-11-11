@@ -457,6 +457,17 @@ button:disabled {
     align-content: start;
     /* Cards keep their natural height; the column scrolls instead. */
     grid-auto-rows: max-content;
+    /* Always show the scrollbar so it's obvious there's more below. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* One scroll area only: lists inside the column grow instead of
+     scrolling on their own. */
+  .dash .side-col .invoice-list,
+  .dash .side-col .events {
+    max-height: none;
+    overflow: visible;
     padding: 0 6px 24px 2px;
   }
 
@@ -531,11 +542,25 @@ button:disabled {
   40% { opacity: 1; }
 }
 
+.examples {
+  padding: 0 20px 8px;
+}
+
+.examples-toggle {
+  border: 0;
+  background: none;
+  padding: 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue);
+  cursor: pointer;
+}
+
 .suggestions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 0 20px 12px;
+  padding: 4px 0 4px;
 }
 
 .chip {

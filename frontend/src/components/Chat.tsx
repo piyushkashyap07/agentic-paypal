@@ -56,6 +56,8 @@ export default function Chat({
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // Example prompts stay folded away so they never cover the conversation.
+  const [showExamples, setShowExamples] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   // Id of the newest monitor event already handled. null until the first load.
@@ -167,12 +169,32 @@ export default function Chat({
         )}
       </div>
 
-      <div className="suggestions">
-        {SUGGESTIONS.map((suggestion) => (
-          <button key={suggestion} className="chip" onClick={() => setInput(suggestion)} disabled={busy}>
-            {suggestion}
-          </button>
-        ))}
+      <div className="examples">
+        <button
+          type="button"
+          className="examples-toggle"
+          aria-expanded={showExamples}
+          onClick={() => setShowExamples((open) => !open)}
+        >
+          {showExamples ? "▾ Hide examples" : "▸ Try an example"}
+        </button>
+        {showExamples && (
+          <div className="suggestions">
+            {SUGGESTIONS.map((suggestion) => (
+              <button
+                key={suggestion}
+                className="chip"
+                onClick={() => {
+                  setInput(suggestion);
+                  setShowExamples(false);
+                }}
+                disabled={busy}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <form className="composer" onSubmit={onSubmit}>
