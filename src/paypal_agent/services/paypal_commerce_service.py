@@ -305,6 +305,10 @@ class PayPalCommerceService:
         order = await self._call(
             "create_order",
             {
+                # Where PayPal sends the buyer after approving or cancelling.
+                # Without these PayPal falls back to a placeholder site.
+                "returnUrl": f"{settings.frontend_url}/dashboard",
+                "cancelUrl": f"{settings.frontend_url}/dashboard",
                 "currencyCode": "USD",
                 "items": [
                     {
